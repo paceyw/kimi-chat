@@ -411,7 +411,7 @@ test("failed continuation clears mapping so next turn starts fresh", async () =>
 test("website sign-in: pasted refresh_token is exchanged, accountId taken from the token", async () => {
   const app = await server()
   // 按 label 取（methods 顺序会随新增登录方式变化）
-  const method = app.auth.methods.find(m => /website/i.test(m.label))
+  const method = app.auth.methods.find(m => /paste/i.test(m.label))
   const origFetch = globalThis.fetch
   // 用户回传的是 refresh JWT（真实形状：typ=refresh、sub=userId）
   const pasted = jwt({ typ: "refresh", sub: "u-42" })
@@ -451,7 +451,7 @@ test("website sign-in: pasted refresh_token is exchanged, accountId taken from t
 
 test("website sign-in: rejects the wrong token and unreachable Kimi honestly", async () => {
   const app = await server()
-  const method = app.auth.methods.find(m => /website/i.test(m.label))
+  const method = app.auth.methods.find(m => /paste/i.test(m.label))
   const grant = await method.authorize()
   const origFetch = globalThis.fetch
   try {
@@ -851,100 +851,84 @@ test("token refresh merges onto oauth-shaped storage (no empty-key throw)", asyn
   assert.equal(merged.userId, "u1", "untouched fields must survive the merge")
 })
 
-test("QR oauth authorize + callback: PENDING→SUCCESS flow", async () => {
+test("phone-code sign-in: opens the website, exchanges the SMS code, no token copying", async () => {
   const app = await server()
   const enc = new TextEncoder()
-  const code = enc.encode("qr-code-1")
-  const at = enc.encode("qr-at"), rt = enc.encode("qr-rt"), uid = enc.encode("qr-user")
-  const successBody = new Uint8Array([
-    0x08, 0x04,
-    0x12, at.length, ...at,
-    0x1a, rt.length, ...rt,
+  const at = enc.encode("sms-at"), rt = enc.encode("sms-rt"), uid = enc.encode("sms-user")
+  const tokenBody = new Uint8Array([
+    0x0a, at.length, ...at,
+    0x12, rt.length, ...rt,
     0x22, uid.length, ...uid,
   ])
-  let statusCalls = 0
+  const seen = []
   const origFetch = globalThis.fetch
-  globalThis.fetch = async (url) => {
+  globalThis.fetch = async (url, init) => {
     const u = String(url)
-    if (u.endsWith("CreateLoginQRCode")) {
-      return new Response(new Uint8Array([0x0a, code.length, ...code]), { status: 200, headers: { "content-type": "application/proto" } })
+    seen.push(u)
+    if (u.endsWith("SendVerifyCode")) {
+      // Kimi 强制人机验证：400 → 插件转而让用户在官网发码
+      return new Response(new Uint8Array([0x08, 0x01]), { status: 400, headers: { "content-type": "application/proto" } })
     }
-    if (u.endsWith("GetLoginQRCodeStatus")) {
-      statusCalls++
-      // 前两次 PENDING，第三次 SUCCESS
-      const body = statusCalls < 3 ? new Uint8Array([0x08, 0x01]) : successBody
-      return new Response(body, { status: 200, headers: { "content-type": "application/proto" } })
+    if (u.endsWith("LoginWithSMS")) {
+      return new Response(tokenBody, { status: 200, headers: { "content-type": "application/proto" } })
     }
     throw new Error("unexpected fetch " + u)
   }
   try {
-    const grant = await app.auth.methods.find(m => /QR/i.test(m.label)).authorize()
-    assert.equal(grant.method, "auto")
-    assert.match(grant.url, /\/wechat\/mp\/auth\?id=qr-code-1&device_id=/)
-    const result = await grant.callback()
+    const method = app.auth.methods.find(m => /phone code/i.test(m.label))
+    assert.ok(method, "phone-code method must exist")
+    const grant = await method.authorize({ phone: "86 13800138000" })
+    assert.equal(grant.method, "code")
+    assert.equal(grant.url, "https://www.kimi.com/login")
+    assert.match(grant.instructions, /human check/i, "must explain the captcha step")
+    assert.doesNotMatch(JSON.stringify(grant.instructions), /localStorage|copy\(/i, "instructions must not ask for token copying")
+
+    const result = await grant.callback("123456")
     assert.equal(result.type, "success")
     const creds = JSON.parse(result.refresh)
-    assert.equal(creds.accessToken, "qr-at")
-    assert.equal(creds.refreshToken, "qr-rt")
-    assert.equal(creds.userId, "qr-user")
-    assert.match(creds.webId, /^[0-9a-f]{32}$/) // 32 hex 设备 id
+    assert.equal(creds.accessToken, "sms-at")
+    assert.equal(creds.refreshToken, "sms-rt")
+    assert.equal(creds.userId, "sms-user")
+    assert.match(creds.webId, /^[0-9a-f]{32}$/)
     assert.match(creds.ssid, /^[0-9a-f]{32}$/)
-    assert.equal(result.accountId, "qr-user")
-    assert.equal(statusCalls, 3)
+    assert.equal(result.accountId, "sms-user")
   } finally { globalThis.fetch = origFetch }
 })
 
-test("QR oauth callback: EXPIRED refreshes code and retries", async () => {
+test("phone-code sign-in: sends the SMS itself when Kimi allows it", async () => {
   const app = await server()
   const enc = new TextEncoder()
-  const at = enc.encode("at2"), rt = enc.encode("rt2")
-  const successBody = new Uint8Array([0x08, 0x04, 0x12, at.length, ...at, 0x1a, rt.length, ...rt])
-  let creates = 0, statusCalls = 0
+  const at = enc.encode("at3"), rt = enc.encode("rt3")
+  const tokenBody = new Uint8Array([0x0a, at.length, ...at, 0x12, rt.length, ...rt])
   const origFetch = globalThis.fetch
   globalThis.fetch = async (url) => {
     const u = String(url)
-    if (u.endsWith("CreateLoginQRCode")) {
-      creates++
-      const code = enc.encode("code-" + creates)
-      return new Response(new Uint8Array([0x0a, code.length, ...code]), { status: 200, headers: { "content-type": "application/proto" } })
-    }
-    if (u.endsWith("GetLoginQRCodeStatus")) {
-      statusCalls++
-      // 第一个码 EXPIRED(3)，第二个码 SUCCESS(4)
-      const body = statusCalls < 2 ? new Uint8Array([0x08, 0x03]) : successBody
-      return new Response(body, { status: 200, headers: { "content-type": "application/proto" } })
-    }
+    if (u.endsWith("SendVerifyCode")) return new Response(new Uint8Array([]), { status: 200, headers: { "content-type": "application/proto" } })
+    if (u.endsWith("LoginWithSMS")) return new Response(tokenBody, { status: 200, headers: { "content-type": "application/proto" } })
     throw new Error("unexpected fetch " + u)
   }
   try {
-    const grant = await app.auth.methods.find(m => /QR/i.test(m.label)).authorize()
-    const result = await grant.callback()
-    assert.equal(result.type, "success")
-    assert.equal(creates, 2, "EXPIRED must mint a new code")
-    JSON.parse(result.refresh) // 合法 JSON
+    const grant = await app.auth.methods.find(m => /phone code/i.test(m.label)).authorize({ phone: "86 13800138000" })
+    assert.match(grant.instructions, /was sent/i, "no captcha path must say the code was sent")
+    assert.equal((await grant.callback("654321")).type, "success")
   } finally { globalThis.fetch = origFetch }
 })
 
-test("QR callback: failed status returns failed result (not throw)", async () => {
+test("phone-code sign-in: a rejected code fails honestly, never pretends to sign in", async () => {
   const app = await server()
   const origFetch = globalThis.fetch
   globalThis.fetch = async (url) => {
     const u = String(url)
-    if (u.endsWith("CreateLoginQRCode")) {
-      const enc = new TextEncoder(), code = enc.encode("c")
-      return new Response(new Uint8Array([0x0a, code.length, ...code]), { status: 200, headers: { "content-type": "application/proto" } })
-    }
-    if (u.endsWith("GetLoginQRCodeStatus")) {
-      // http 500 → upstream_error → callback 内部 continue 重试；改用未知 status 触发 failed
-      return new Response(new Uint8Array([0x08, 0x63]), { status: 200, headers: { "content-type": "application/proto" } }) // status=99 未知
-    }
+    if (u.endsWith("SendVerifyCode")) return new Response(new Uint8Array([]), { status: 200, headers: { "content-type": "application/proto" } })
+    if (u.endsWith("LoginWithSMS")) return new Response(new Uint8Array([]), { status: 401, headers: { "content-type": "application/proto" } })
     throw new Error("unexpected fetch " + u)
   }
   try {
-    const grant = await app.auth.methods.find(m => /QR/i.test(m.label)).authorize()
-    const result = await grant.callback()
+    const grant = await app.auth.methods.find(m => /phone code/i.test(m.label)).authorize({ phone: "86 13800138000" })
+    const result = await grant.callback("000000")
     assert.equal(result.type, "failed")
-    assert.match(result.error, /unexpected status/)
+    assert.match(result.error, /rejected the verification code/i)
+    assert.equal(result.refresh, undefined)
   } finally { globalThis.fetch = origFetch }
 })
 

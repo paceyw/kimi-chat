@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 — 2026-10-27
+
+**登录**
+
+- 新的默认方式「Sign in on the Kimi website (phone code)」：magpie 打开 `https://www.kimi.com/login`，用户填手机号 →
+  收到 6 位短信验证码 → 填回 magpie。插件用 `LoginWithSMS` 直接把验证码换成会话令牌，**不需要复制任何 token**。
+  当 Kimi 要求人机验证时（常见），用户就在刚打开的页面里发码，其余流程不变。
+- 移除扫码登录（`CreateLoginQRCode`/`GetLoginQRCodeStatus` 轮询）：`/wechat/mp/auth` 是微信专用确认页，桌面浏览器无法完成。
+- 原网页登录改为备用项「Advanced: paste a refresh_token from the website」，仅在收不到短信/号码不支持时使用。
+- 记录并排除「Kimi Code OAuth 设备授权」方案：该通道能自动换 token，但签发 `scope=kimi-code`（`iss=kimi-auth`），
+  网页 Chat 与用量接口都回 401（见 `PROTOCOL.md` §6.3）。
+
 ## 0.2.0 — 2026-10-27
 
 **登录**

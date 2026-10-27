@@ -27,34 +27,31 @@ magpie plugin add kimi-chat
 
 ## 怎么登录
 
-### 方式 A：网页登录（推荐）
+### 方式 A：网页登录 + 短信验证码（推荐）
 
-1. magpie → 供应商 `kimi-chat` → 添加账号，选 **“Sign in on the Kimi website”**。
-2. magpie 会打开 <https://www.kimi.com/login>，在页面里用手机号 / 微信 / 密码正常登录。
-3. 回到 magpie 的输入框，粘贴你的 `refresh_token`：
+1. magpie → 供应商 `kimi-chat` → 添加账号，选 **“Sign in on the Kimi website (phone code)”**，填手机号（带国家码，例如 `86 13800138000`）。
+2. magpie 会打开 <https://www.kimi.com/login>。如果 Kimi 允许插件直接发码，短信会立刻到你手机；如果它要求人机验证（常见），就在刚打开的页面里走一遍「登录 → 手机号 → 发送验证码」，把码发出来。
+3. 回到 magpie，填你收到的 6 位验证码。
 
-   - DevTools（F12）→ **Application → Local Storage → `https://www.kimi.com`** → 复制键 `refresh_token` 的值；
-   - 或者更快：在 DevTools 的 **Console** 里执行
+插件拿这 6 位码当场换取会话令牌（`access_token` + `refresh_token`），**不需要你复制任何 token**；账号归属（`accountId`）取自令牌，不用填 ID。
 
-     ```js
-     copy(localStorage.getItem('refresh_token'))
-     ```
+### 方式 B：粘贴 `refresh_token`（备用）
 
-     令牌会直接进剪贴板，回到 magpie 粘贴即可。
+上面的验证码方式走不通时（换号、收不到短信、号码不在支持地区），可以选 **“Advanced: paste a refresh_token from the website”**：
 
-4. 插件立刻拿这个 `refresh_token` 去换 `access_token`：
-   - 换成功 → 登录完成，账号归属（`accountId`）取自令牌里的 `sub`，不需要你填任何 ID；
-   - 换失败（401 / 已登出）→ 当场报错，不会存下一个几分钟后就失效的坏凭据。
+1. magpie 打开 <https://www.kimi.com/login>，在页面里正常登录。
+2. DevTools（F12）→ **Application → Local Storage → `https://www.kimi.com`** → 复制 `refresh_token` 的值；
+   或直接在 **Console** 里执行
 
-只粘 `refresh_token` 一个值就够了：`access_token` 由插件自己换，设备指纹（device/session id）由插件本地生成。
+   ```js
+   copy(localStorage.getItem('refresh_token'))
+   ```
 
-### 方式 B：扫码（Kimi App / 微信）
+3. 粘贴回 magpie。插件会立刻用它换新的 `access_token`：换成功才存，401（已登出/值不对）当场报错，不会留下几分钟后就失效的坏凭据。
 
-添加账号时选 `Kimi Chat app sign-in (scan the QR code)`，在打开的 kimi.com 页面里用 Kimi App 或微信扫码确认，**全自动完成**（二维码过期会自动换新，总窗口 5 分钟）。
+只粘 `refresh_token` 一个值就够：`access_token` 由插件自己换，设备指纹（device/session id）由插件本地生成。
 
-### 方式 C：手机号 + 短信验证码
-
-选 `Sign in with phone number (SMS code)`：如果 Kimi 允许直接发码，插件会发；如果要人机验证（常见），插件会提示你**自己在官网发码**（在网页里过人机验证），然后把收到的 6 位码填回 magpie。
+> 为什么没有「扫码」和「一键自动回传」：扫码方式已按需求下线；而 kimi.com 的网页登录没有对第三方开放的回调通道，令牌只会落在浏览器本地存储里，插件读不到——Kimi Code 那套 OAuth 设备授权虽然能自动换 token，但签发的是 `scope=kimi-code` 的令牌，网页聊天接口不认（实测 401，见 `PROTOCOL.md` §6.3）。所以能在「不复制 token」前提下工作的最短路径就是上面的验证码方式。
 
 ## 登录信息存在哪里
 

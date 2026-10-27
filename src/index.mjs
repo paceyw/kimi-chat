@@ -8,7 +8,7 @@ import { buildCatalog, toProviderModels, DEFAULT_PRICING } from "./models.mjs"
 import { chunk, finishReason, messageText, toPrompt, validateMessages } from "./openai.mjs"
 import { classifyError, complete, parseCredentials, resolveModels, safeErrorMessage } from "./kimi-api.mjs"
 import {
-  cancelChat, refreshToken, createLoginQRCode, getLoginQRCodeStatus,
+  cancelChat, refreshToken,
   sendVerifyCode, loginWithSMS, parsePhoneNumber, getSubscriptionStats, getSubscription,
 } from "./kimi-connect.mjs"
 import { uiToolCall, uiEvent as uiEventRaw } from "./ui-protocol.mjs"
@@ -115,17 +115,76 @@ export const server = async () => {
       icon: "https://www.kimi.com/pwa-192.png",
       methods: [
         {
-          // 主登录方式：magpie 打开官方登录页 → 用户在网页里登录 → 回传 refresh_token。
+          // 主登录方式：magpie 打开官方登录页 → 用户用手机验证码登录 → 插件自动换 token。
+          // 实测（PROTOCOL.md §6.3）：SendVerifyCode 强制人机验证，短信一般要在官网页面发；
+          // 但 LoginWithSMS 不校验 captcha，验证码正确就能换到 web token ——
+          // 用户全程不需要复制 token，只需要输入收到的 6 位验证码。
+          type: "oauth",
+          label: "Sign in on the Kimi website (phone code)",
+          prompts: [{
+            type: "text",
+            key: "phone",
+            message: "Kimi account phone number with country code — e.g. 86 13800138000",
+            placeholder: "86 13800138000",
+            validate: (value) => {
+              try { parsePhoneNumber(value); return undefined } catch (e) { return e.message }
+            },
+          }],
+          async authorize(inputs = {}) {
+            let phone
+            try { phone = parsePhoneNumber(inputs.phone) } catch (error) { return { type: "failed", error: error.message } }
+            const shown = `+${phone.countryCode} ${phone.number}`
+            // 先试着直接发码；Kimi 会要求人机验证（不绕）——那就让用户在官网自己发码
+            let sent = { ok: false, captcha: true, message: "" }
+            try { sent = await sendVerifyCode(phone) } catch (error) { sent = { ok: false, captcha: true, message: error?.message ?? "" } }
+            const instructions = sent.ok
+              ? `A verification code was sent to ${shown}. Type the 6-digit code here — the plugin turns it into a signed-in session itself, so there is no token to copy.`
+              : `Kimi asks for a human check before it sends an SMS, so send it on the Kimi page that just opened at https://www.kimi.com/login (Sign in → phone number → send code), then type the 6-digit code you got for ${shown} here. The plugin turns that code into a signed-in session by itself — there is no token to copy.`
+            return {
+              // 跳转官方网页登录：这一页既能完成人机验证发码，也让用户看清登录的是哪个账号。
+              url: `${ORIGIN}/login`,
+              instructions,
+              method: "code",
+              async callback(code) {
+                const digits = String(code ?? "").replace(/\D/g, "")
+                if (!digits) return { type: "failed", error: "verification code is required" }
+                let r
+                try {
+                  r = await loginWithSMS(phone, digits)
+                } catch (error) {
+                  const why = error?.kind === "unauthorized"
+                    ? "Kimi rejected the verification code (wrong or expired) — request a new one"
+                    : (error?.message ?? String(error))
+                  return { type: "failed", error: why }
+                }
+                const webId = deviceWebId()
+                const creds = {
+                  accessToken: r.accessToken,
+                  refreshToken: r.refreshToken,
+                  userId: r.userId || webId,
+                  webId,
+                  ssid: randomId(),
+                  timezone: "Asia/Shanghai",
+                }
+                const key = JSON.stringify(creds)
+                return { type: "success", refresh: key, access: r.accessToken, expires: 0, accountId: r.userId || webId }
+              },
+            }
+          },
+        },
+        {
+          // 备用登录：在官网登录后把 refresh_token 贴进来。
           // 只要 refresh_token 就够（实测 PROTOCOL.md §6.2：X-Traffic-Id / webId / ssid 都不是必需），
           // userId 从刷新后的 access token（JWT）的 sub 里取，账号归属不用用户手填。
           type: "oauth",
-          label: "Sign in on the Kimi website",
+          label: "Advanced: paste a refresh_token from the website",
           async authorize() {
             return {
               url: `${ORIGIN}/login`,
               instructions: [
+                "Fallback only — the phone-code sign-in above needs no copying.",
                 "1. Sign in on the Kimi page that just opened (phone, WeChat or password).",
-                "2. Copy your credentials. Easiest: in the DevTools Console (F12) run",
+                "2. In the DevTools Console (F12) run",
                 "   copy(localStorage.getItem('refresh_token'))",
                 "   or, for both tokens at once:",
                 "   copy(JSON.stringify({accessToken: localStorage.getItem('access_token'), refreshToken: localStorage.getItem('refresh_token')}))",
@@ -165,106 +224,6 @@ export const server = async () => {
                 )
                 const key = JSON.stringify(creds)
                 return { type: "success", refresh: key, access: nt.accessToken, expires: 0, accountId: creds.userId || "kimi-web-account" }
-              },
-            }
-          },
-        },
-        {
-          type: "oauth",
-          label: "Kimi Chat app sign-in (scan the QR code)",
-          async authorize() {
-            // 主流 OAuth 插件同构：authorize 返回 url+callback；宿主打开浏览器/展示 url，
-            // callback 轮询到 SUCCESS 自动完成。QR 内容 = 前端 WechatQrPanel 同款 URL。
-            let code = await createLoginQRCode();
-            const webId = deviceWebId();
-            const url = `${ORIGIN}/wechat/mp/auth?id=${encodeURIComponent(code)}&device_id=${encodeURIComponent(webId)}`;
-            return {
-              url,
-              instructions: "Open the URL (or scan the QR with the Kimi app / WeChat) and confirm the login; this finishes on its own.",
-              method: "auto",
-              async callback() {
-                const fail = (error) => ({ type: "failed", error });
-                const deadline = Date.now() + 5 * 60_000; // EXPIRED 时换新码重试，总窗 5 分钟
-                for (;;) {
-                  await new Promise(r => setTimeout(r, 1200));
-                  if (Date.now() > deadline) return fail("Kimi sign-in timed out; start again");
-                  let st;
-                  try {
-                    st = await getLoginQRCodeStatus(code);
-                  } catch (e) {
-                    if (e?.kind === "upstream_error") continue; // 瞬时故障：再问
-                    return fail("Kimi sign-in: " + (e?.message ?? e));
-                  }
-                  if (st.status === 1 || st.status === 2) continue; // PENDING / SCANNED
-                  if (st.status === 3) { // EXPIRED：换新码（同一轮 callback 内自续）
-                    code = await createLoginQRCode();
-                    continue;
-                  }
-                  if (st.status !== 4 || !st.accessToken || !st.refreshToken) return fail("Kimi sign-in: unexpected status " + st.status);
-                  // 生成配套设备指纹（与 webId 一致的 ssid/userId 填充）
-                  const creds = {
-                    accessToken: st.accessToken,
-                    refreshToken: st.refreshToken,
-                    userId: st.userId || webId,
-                    webId,
-                    ssid: randomId(),
-                    timezone: "Asia/Shanghai",
-                  };
-                  const key = JSON.stringify(creds);
-                  return { type: "success", refresh: key, access: st.accessToken, expires: 0, accountId: st.userId || webId };
-                }
-              },
-            };
-          },
-        },
-        {
-          type: "oauth",
-          label: "Sign in with phone number (SMS code)",
-          prompts: [{
-            type: "text",
-            key: "phone",
-            message: "Kimi account phone number with country code — e.g. 86 13800138000",
-            placeholder: "86 13800138000",
-            validate: (value) => {
-              try { parsePhoneNumber(value); return undefined } catch (e) { return e.message }
-            },
-          }],
-          async authorize(inputs = {}) {
-            let phone
-            try { phone = parsePhoneNumber(inputs.phone) } catch (error) { return { type: "failed", error: error.message } }
-            const shown = `+${phone.countryCode} ${phone.number}`
-            // 先试着直接发码；Kimi 会要求人机验证（不绕）——那就让用户在官网自己发码，再把码填进来
-            let sent = { ok: false, captcha: true, message: "" }
-            try { sent = await sendVerifyCode(phone) } catch (error) { sent = { ok: false, captcha: true, message: error?.message ?? "" } }
-            const instructions = sent.ok
-              ? `A verification code was sent to ${shown}. Enter the 6-digit code here.`
-              : `Kimi asks for a human check before sending an SMS, so send it yourself: open https://www.kimi.com in a browser, click Sign in → phone number, send the code (pass the human check there), then type the 6-digit code you received for ${shown} here.`
-            return {
-              instructions,
-              method: "code",
-              async callback(code) {
-                const digits = String(code ?? "").replace(/\D/g, "")
-                if (!digits) return { type: "failed", error: "verification code is required" }
-                let r
-                try {
-                  r = await loginWithSMS(phone, digits)
-                } catch (error) {
-                  const why = error?.kind === "unauthorized"
-                    ? "Kimi rejected the verification code (wrong or expired) — request a new one"
-                    : (error?.message ?? String(error))
-                  return { type: "failed", error: why }
-                }
-                const webId = deviceWebId()
-                const creds = {
-                  accessToken: r.accessToken,
-                  refreshToken: r.refreshToken,
-                  userId: r.userId || webId,
-                  webId,
-                  ssid: randomId(),
-                  timezone: "Asia/Shanghai",
-                }
-                const key = JSON.stringify(creds)
-                return { type: "success", refresh: key, access: r.accessToken, expires: 0, accountId: r.userId || webId }
               },
             }
           },

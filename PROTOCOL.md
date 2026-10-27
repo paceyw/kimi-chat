@@ -119,28 +119,20 @@ Usage 限流类 → magpie rate_limited；CONTENT_FILTER → content_filter；CH
 
 搜索：`tools=[{type:Search(1), search:{force:false}}]`——前端 tt() 证实 `e.search` 为真才 push SEARCH Tool，force 默认 false（服务端自行决定是否搜索）；force=true 为强制每次搜索（我们未启用）。tools 初始 `[]`，另有 IMAGE_GENERATION/AUDIO 分支（本插件不做）。用户消息构造：`{role:user(2), blocks:[{TextBlock{content}}], scenario, labels, references, isGoal}`，文件走独立 file blocks。
 
-## 6. 登录引导（2026-10-27 改版：网页登录优先）
+## 6. 登录引导（2026-10-27 改版：网页登录 + 验证码，扫码已下线）
 
-**主路径（网页登录，oauth `method:"code"`）**：`magpie plugin login kimi-chat` 选 "Sign in on the Kimi website" → 宿主打开 `https://www.kimi.com/login` → 用户在网页里正常登录（手机号/微信/密码）→ 回 magpie 粘贴 `refresh_token`：
+**主路径（网页登录 + 短信验证码，oauth `method:"code"`，`prompts:[phone]`）**：`magpie plugin login kimi-chat` 选 "Sign in on the Kimi website (phone code)" → 宿主打开 `https://www.kimi.com/login` → 插件先试 `SendVerifyCode`：
 
-- DevTools（F12）→ Application → Local Storage → `https://www.kimi.com` → 键 `refresh_token`；
-- 或在 DevTools Console 执行 `copy(localStorage.getItem('refresh_token'))` 直接进剪贴板。
+- 允许直接发码 → 短信即刻到达，用户只需回填 6 位码；
+- 要求人机验证（`REASON_ACCOUNT_CAPTCHA_VERIFY_FAILED`，实测常见）→ 用户在刚打开的网页里走「登录 → 手机号 → 发送验证码」，再把 6 位码回填 magpie。
 
-插件收到后立刻调 `RefreshToken` 换 `access_token`（活体验证：401 当场拒绝，网络故障不假装成功），然后：
+插件收到验证码后调 `LoginWithSMS`（**该校验不检查 captcha**，只要码正确就换得到 token）→ 拿到 `access_token` / `refresh_token` / `user_id`，直接落 oauth 形状。**全程不需要用户复制任何 token**，`accountId` 用返回的 `user_id`。
 
-- `userId` 取新 access token JWT 的 `sub`（= `abstract_user_id`），**不需要用户填任何 ID**；
-- `webId`/`ssid` 插件内 `crypto.getRandomValues` 现生成（实测非必需，见 §6.2）；
-- 存 oauth 形状，`accountId = userId`，重复登录会替换同账号。
+**备选路径（粘贴 `refresh_token`，oauth `method:"code"` 无 prompts）**：标签 "Advanced: paste a refresh_token from the website"。宿主打开 `https://www.kimi.com/login`，用户登录后在 DevTools Console 执行 `copy(localStorage.getItem('refresh_token'))`，回 magpie 粘贴；插件立刻调 `RefreshToken` 活体验证（401 当场拒绝、网络故障不假装成功），`userId` 取新 access token JWT 的 `sub`。粘贴形状容忍：裸 JWT、带引号、`refresh_token=<值>`、`{"refreshToken":...}` JSON；把 `access_token` 粘进来会被明确拒绝（它 15 分钟就过期，存下来等于假登录）。
 
-粘贴形状容忍：裸 JWT、带引号、`refresh_token=<值>`、`{"refreshToken":...}` JSON；把 `access_token` 粘进来会被明确拒绝（它 15 分钟就过期，存下来等于假登录）。
+**已下线：QR 扫码**（原 `CreateLoginQRCode` + `GetLoginQRCodeStatus` 轮询）。原因：`/wechat/mp/auth` 是微信专用确认页（chunk `CdQwmZoy2.js` 只有一张「open in WeChat」图 + 文案，无任何 RPC），桌面浏览器走不通；按产品要求改由验证码方式承接。`kimi-connect.mjs` 里的两个 QR 原语与其 wire 测试保留（未被登录流程引用）。
 
-**备选路径（QR 扫码，oauth auto 方法）**：选 "Kimi Chat app sign-in (scan the QR code)" → 宿主打开 `https://www.kimi.com/wechat/mp/auth?id=<code>&device_id=<webId>`（前端 WechatQrPanel 同款 URL）→ Kimi App/微信扫码确认 → 插件 1.2s 轮询 `GetLoginQRCodeStatus`，EXPIRED 自动换码（5 分钟总窗）→ SUCCESS 直接收 token 对。
-实测（2026-10-26 无鉴权干跑）：`CreateLoginQRCode` → field1=UUID；`GetLoginQRCodeStatus{code}` → `08 01` = status PENDING(1)，PENDING=1/SCANNED=2/EXPIRED=3/SUCCESS=4 + access_token/refresh_token/user_id。
-⚠️ 该 QR URL 是微信公众号扫码路径，绑定微信的账号扫码直接可用；未绑定微信的账号用 App 内扫一扫测试。
-
-**备选路径（手机号 + 短信）**：`parsePhoneNumber` → `sendVerifyCode` → `loginWithSMS`（`LoginWithSMSResponse` 带 `user_id=4`）。Kimi 常要求人机验证，此时插件提示用户自己在官网发码，再把 6 位码回填（`method:"code"`）。
-
-**凭据存储形状**：三条登录路径都交回 oauth 形状 `{type:"oauth", refresh:<凭据JSON串>, access:<access token>, expires:0, accountId:<userId>}`（宿主 `secretOf` 取 `refresh ?? access`）；早期 api 形状 `{type:"api", key, metadata}` 仍可读（`authRaw()` 两种都吃）。`auth.refresh()` 交回 `{refresh, access, expires}` 由宿主 `save()` 落盘；请求中途刷新的结果先挂 `pendingRefresh` 交给下一次 `auth.refresh()`，避免与聊天轮抢写。
+**凭据存储形状**：两条登录路径都交回 oauth 形状 `{type:"oauth", refresh:<凭据JSON串>, access:<access token>, expires:0, accountId:<userId>}`（宿主 `secretOf` 取 `refresh ?? access`）；早期 api 形状 `{type:"api", key, metadata}` 仍可读（`authRaw()` 两种都吃）。`auth.refresh()` 交回 `{refresh, access, expires}` 由宿主 `save()` 落盘；请求中途刷新的结果先挂 `pendingRefresh` 交给下一次 `auth.refresh()`，避免与聊天轮抢写。
 
 ### 6.2 网页登录的最小凭据集（2026-10-27 真机活体实测）
 
@@ -167,6 +159,31 @@ Usage 限流类 → magpie rate_limited；CONTENT_FILTER → content_filter；CH
 
 登录页可用性（2026-10-27）：`/` 200、`/login` 200、`/signin` 302→`/`；`kimi.moonshot.cn` 302→`www.kimi.com`。
 
+
+### 6.3 为什么不能用「Kimi Code 的 OAuth 设备授权」自动拿网页 token（2026-10-27 实测，已排除）
+
+背景：想要「网页上点一下登录 → 插件自动拿到 token」，最像现成答案的是 Kimi 自己的 **OAuth 2.0 Device Authorization Grant**（网页 `/code/authorize_device` 页面 + `account/gateway/v1/oauth.proto` 的 `OAuthService.GetDeviceGrant/ApproveDeviceGrant/RejectDeviceGrant`，前端 chunk `Fck5pvyN.js`；CLI 侧实现在 `MoonshotAI/kimi-cli` 的 `src/kimi_cli/auth/oauth.py`）。整条链路确实能跑通：
+
+1. `POST https://auth.kimi.com/api/oauth/device_authorization`，form `client_id=17e5f671-d194-4dfb-9706-5516cb48c098`（Kimi Code CLI 的公开 client_id）
+   → `{"device_code":"…","user_code":"XXXX-XXXX","verification_uri":"https://www.kimi.com/code/authorize_device","verification_uri_complete":"https://www.kimi.com/code/authorize_device?user_code=XXXX-XXXX","expires_in":1800,"interval":5}`
+2. 用户在 `verification_uri_complete` 页面登录并点「登录」（内部即 `ApproveDeviceGrant`）。
+3. `POST https://auth.kimi.com/api/oauth/token`，form `client_id` + `device_code` + `grant_type=urn:ietf:params:oauth:grant-type:device_code`
+   - 未批准：`400 {"error":"authorization_pending","error_description":"Authorization is pending"}`
+   - 已批准：`200 {access_token, refresh_token, expires_in:900, scope:"kimi-code", token_type:"Bearer"}`
+
+**但签发出来的令牌网页聊天接口不认**——实测（真机，用户点过确认）：
+
+```
+scope: kimi-code
+claims: {"client_id":"17e5f671-…","user_id":"<userId>","scope":"kimi-code","type":"access",
+         "iss":"kimi-auth","sub":"<userId>","region":"cn","exp":…}
+Chat  → 401 unauthorized
+GetSubscriptionStats → 401
+```
+
+对比网页 token 的 `iss:"account"` / `aud:["kimi.com"]` / `typ:"access"` / 带 `roles`，可见两条令牌体系不同源：设备授权发放的是 **Kimi Code 产品**的 OAuth 令牌（`iss=kimi-auth`），网页 Chat RPC 只接受网页会话令牌（`iss=account`）。因此「自动取网页 token」在协议层不存在可用通道，除非能读到浏览器本地存储（需要浏览器扩展或 CDP，不属于插件能力）。
+
+补充：自助批准（不用人点）也没有可用入口——`www.kimi.com/api/account.gateway.v1.OAuthService/ApproveDeviceGrant` 回 `404 {"detail":"Cannot POST /account.gateway.v1.OAuthService/ApproveDeviceGrant"}`，`/apiv2/...` 回 `404 page not found`，`auth.kimi.com/api/...`（proto/json、补 Origin/`x-msh-platform` 等浏览器头）一律 `415`。
 
 ## 6.1 登录后冒烟测试
 
