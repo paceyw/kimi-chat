@@ -35,6 +35,9 @@ magpie quota                              # 应出现「月额度」窗口与剩
 >
 > 注意 spec 要带来源前缀：`github:paceyw/kimi-chat`（或 GitHub 仓库链接）。若把 `plugins.json` 里的 spec 写成裸包名
 > `kimi-chat` 而 npm 上还没有这个包，magpie 重启时会因解析不到而把这条 spec 丢掉，插件就从列表里消失了。
+>
+> 如果 magpie 提示 “Kimi Chat (Web) is signed in but not offered: You removed it from magpie”，那是上面这种情况留下的
+> 「已移除」标记，跑一次 `magpie provider add kimi-chat` 就能恢复，**登录状态不会丢**。
 
 ## 它登录什么
 
