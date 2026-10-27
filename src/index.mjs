@@ -15,6 +15,7 @@ import {
 import { uiToolCall, uiEvent as uiEventRaw } from "./ui-protocol.mjs"
 import { toUsageReport, DEFAULT_PLAN_CNY } from "./usage.mjs"
 import { scanToolCalls, toolCallDelta, toolPrompt } from "./tools.mjs"
+import { webSkillPrompt } from "./skills.mjs"
 import { buildCredentials, parseLoginInput } from "./login.mjs"
 
 const sessions = new Map() // sessionId -> { kimiSessionId, updatedAt, fingerprint }
@@ -297,6 +298,9 @@ export const server = async () => {
             // 客户端工具（OpenAI tools）不是上游的一等能力：渲染成提示词里的工具手册，
             // 再把模型输出的 <tool_call> 转回 OpenAI tool_calls（见 tools.mjs）。
             const toolBlock = toolPrompt(body.tools)
+            // Kimi 网页端的内置技能（/app/.agents/skills/…）在这里不存在，
+            // 按需注入"别去找 SKILL.md + 等价做法"（见 skills.mjs）。
+            const skillBlock = webSkillPrompt({ messages: body.messages, tools: body.tools })
             // magpie 会自己加 stream_options.include_usage=true，然后读收尾的 usage 帧记账；
             // 不认这个开关的客户端不会收到多余帧。
             const includeUsage = body.stream_options?.include_usage === true
@@ -330,7 +334,9 @@ export const server = async () => {
               prompt = head.length ? [...head.map((m) => messageText(m)), toPrompt(tail)].filter(Boolean).join("\n\n") : toPrompt(tail)
             }
             if (!prompt.trim()) return invalid("Kimi requires non-empty text")
-            if (toolBlock) prompt = `${toolBlock}\n\n${prompt}`
+            // 提示词前缀：工具手册 + 内置技能适配（各自只在需要时出现）
+            const prefix = [toolBlock, skillBlock].filter(Boolean).join("\n\n")
+            if (prefix) prompt = `${prefix}\n\n${prompt}`
             if (prompt.length > LIMITS.maxPromptCharacters) return invalid("Kimi prompt is too large")
             let step0 = {}
 

@@ -5,8 +5,8 @@
 
 - 供应商 id：`kimi-chat`（客户端里写作 `kimi-chat/kimi-fast` 这样）
 - 上游：`https://www.kimi.com/apiv2`（connect-rpc over protobuf，私协议，见 [PROTOCOL.md](PROTOCOL.md)）
-- 能力：流式对话、思考档、联网搜索 + 引用、客户端工具调用（`tools`）、生成式 UI 事件、月额度与费用估算、token 用量（估算，见下）
-- 当前版本：**0.4.3**（变更见 [CHANGELOG.md](CHANGELOG.md)）；Node ≥ 20.3，无运行时依赖，纯 ESM
+- 能力：流式对话、思考档、联网搜索 + 引用、客户端工具调用（`tools`，工具手册压缩）、Kimi 网页端技能适配（如 `kimi-widget` 组件卡片）、生成式 UI 事件、月额度与费用估算、token 用量（估算，见下）
+- 当前版本：**0.5.0**（变更见 [CHANGELOG.md](CHANGELOG.md)）；Node ≥ 20.3，无运行时依赖，纯 ESM
 
 ## 安装
 
@@ -131,12 +131,47 @@ magpie quota                              # 应出现「月额度」窗口与剩
 
 - **对话长度**：**默认不支持选择**，固定用标准档（L）。超长上下文会让单次请求的消耗成倍上涨，而且几乎没有客户端能传这个额外参数；需要时可在服务端用 `KIMI_MAX_CONTEXT_LENGTH` 调高上限（取决于账号权限）。
 - **速度**：**默认不支持选择**，固定用上游的 FAST 档（请求枚举 5）。更快的档位与更高消耗绑定、且只有部分模型提供，客户端也很少能传这个参数，所以不做开关。
-- **客户端工具**：不是上游一等能力，但插件支持：把请求里的 `tools` 渲染成提示词里的工具手册，再把模型输出的 `<tool_call>` 还原成 OpenAI `tool_calls`（`finish_reason: "tool_calls"`），能力位因此报 `toolcall: true`。复杂工具流建议用 Agent 档。
+- **客户端工具**：不是上游一等能力，但插件支持：把请求里的 `tools` 渲染成提示词里的工具手册，再把模型输出的 `<tool_call>` 还原成 OpenAI `tool_calls`（`finish_reason: "tool_calls"`），能力位因此报 `toolcall: true`。工具多的时候手册会自动压缩（见下节）。复杂工具流建议用 Agent 档。
 - **联网搜索**：默认开启，搜索结果以 `search-results` UI 事件 + `annotations` 引用返回；`search_enabled: false` 可关。注意上面那条：快速档要先开思考，服务端才会真的挂 `web_search`。
 - **标题类请求**：客户端发来「给会话起标题」的请求（system 里带 `Create a concise title…`）时，插件自动关掉思考与联网搜索——这类请求不需要工具，开着只是白花额度；同一个 magpie 会话的标题请求还会复用同一个上游 chat，不会在 Kimi 网页里变成一串多余的「会话」。
 - **空回答补偿**：上游偶尔会在思考后直接停下（`finish=stop`、正文为空、没有工具调用）。插件会自动在同一会话里把「请直接给出最终答复」再说一遍、重问一次；第二次的思考不重复推给客户端。第二次仍为空才把空结果交回去。
   这类请求客户端自己也会重试（实测某客户端重发一次、prompt 多 8 个 token），插件先补一次等于替客户端省掉一轮完整费用。
 - **生成式 UI**：搜索/引用/时间线/产物以 `agent-timeline`、`citation-list`、`preview-card` 等白名单组件的事件流输出（Agent UI Protocol v1），未适配的客户端只看到文本 + 工具调用。
+
+### 工具手册压缩
+
+真实编码客户端一次能声明 **300+ 个工具**。把这些工具的完整 JSON schema 塞进提示词是笔冤枉钱，也更容易让模型把不存在的工具名一起“脑补”出来（真机见过：模型坚持要先 `read` 一个根本没声明的 `SKILL.md`）。
+
+默认渲染是「一行一个工具」：
+
+```
+- fs_read(path*:str, offset:int, limit:int): Read an existing file before overwriting it with write.
+- web_search(queries*:arr): Search the web for up-to-date information.
+```
+
+`*` 标必填，`str/int/bool/arr/obj` 是 JSON 类型，`+N` 表示还有 N 个参数没列，`"a"|"b"` 是枚举；说明只保留**第一句**（去掉各家客户端 `Calling convention:` 之后的样板）。超出预算时按阶梯整体缩短说明（160 → 120 → 96 → 72 → 56 → 40 字），仍放不下才从最长的行开始退到“只有名字”。**工具名永远不会被丢掉**——预算只是软目标，名字消失等于工具不存在。
+
+真机对照（DSH 声明 305 个工具）：
+
+| 渲染方式 | 字符数 | 说明 |
+|---|---|---|
+| 完整 JSON schema | 330,230 | 约 8 万 token |
+| 一行一工具（默认预算 48k） | 45,381 | 约 1.2 万 token，7 倍压缩，每个工具仍有 72 字说明 |
+| 一行一工具（`KIMI_TOOLS_MAX_CHARS=0`） | 57,870 | 每个工具保留完整的第一句 |
+| 完整 JSON schema（`KIMI_TOOLS_MODE=full`） | 330,230 | 旧行为，仅排查兼容问题时用 |
+
+可调：`KIMI_TOOLS_MAX_CHARS=0` 关掉预算；`KIMI_TOOLS_MODE=full` 回到完整 schema（默认 `compact`）。
+
+### 网页端技能适配（`kimi-widget` 之类）
+
+Kimi 的网页/桌面容器里挂着 `/app/.agents/skills/<name>/SKILL.md`。模型在那边遇到「做个组件卡片」会先 `read` 一下 `kimi-widget` 的规范再动手；换到我们这个 OpenAI 兼容通道里，那个路径**不存在**（实测报 `FS_NOT_FOUND`），而失败之后模型经常顺着这条错思路继续想，最后只吐思考、不吐正文。
+
+所以插件在两种情况下往提示词前面加一段校正（`src/skills.mjs`）：
+
+- 提示词里出现 `/app/.agents/skills` 或 `SKILL.md`：明确告诉模型「这里不是 Kimi 容器，没有那个目录，别为了读规范去调工具」；
+- 最后一条用户消息像是要「卡片 / 组件 / 看板 / widget」，且客户端**没有**提供 `show_widget` / `render_widget` / `artifact` 这类工具：附上 `kimi-widget` 的等价做法——直接输出一段内联样式的自包含 HTML，先把数据查好再一次性出卡片，卡片外最多一句说明。
+
+客户端自己就有 widget/artifact 渲染工具时只保留第一条，免得跟真正的渲染能力打架。`KIMI_WEB_SKILLS=0` 可关掉整段注入。
 
 ## 用量与费用
 
@@ -164,11 +199,11 @@ magpie quota                              # 应出现「月额度」窗口与剩
 ## 开发与验证
 
 ```bash
-npm run check     # 13 个源文件语法检查
-npm test          # 单元测试（12 个文件 / 110 条，全部离线：假 transport，不需要登录、不打真实网络）
+npm run check     # 14 个源文件语法检查
+npm test          # 单元测试（14 个文件 / 131 条，全部离线：假 transport，不需要登录、不打真实网络）
 ```
 
-测试覆盖：wire 级 protobuf 编解码、Chat 流解析、工具调用标记切分、登录输入解析（含中文提示文案）、模型目录映射、思考档夹取、token 估算、逐帧取证、空回答补偿重试、标题会话复用、用量换算、UI 事件信封、多轮会话映射。
+测试覆盖：wire 级 protobuf 编解码、Chat 流解析、工具调用标记切分与手册压缩（含预算降级、300 工具语料）、网页端技能适配注入、登录输入解析（含中文提示文案）、模型目录映射、思考档夹取、token 估算、逐帧取证、空回答补偿重试、标题会话复用、用量换算、UI 事件信封、多轮会话映射。
 CI 在 Node 20 / 22 / 24 上跑同一套（`.github/workflows/test.yml`）。本地不需要 `npm install`（零依赖），也不需要登录 Kimi。
 
 ### 抓一份逐帧日志（可选）

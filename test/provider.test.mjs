@@ -1054,3 +1054,42 @@ test("session titles share one upstream chat instead of one per turn", async () 
     complete._transport = saved
   }
 })
+
+test("client tools are rendered as a compact manual instead of raw JSON schema", async () => {
+  const { complete } = await import("../src/kimi-api.mjs")
+  const saved = complete._transport
+  let prompt = ""
+  complete._transport = async function* (opts) {
+    prompt = opts.prompt
+    yield { block: { id: "1", text: { content: "ok" } } }
+    yield { status: "FINISHED" }
+  }
+  try {
+    const tools = [{ type: "function", function: { name: "fs_read", description: "Read a file.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } } }]
+    const response = await loaderFetch([{ role: "user", content: "读一下 a.txt" }], { extra: { tools } })
+    assert.equal(JSON.parse(await response.text()).choices[0].message.content, "ok")
+    assert.match(prompt, /^# Tool calling/m)
+    assert.match(prompt, /^- fs_read\(path\*:str\): Read a file\.$/m)
+    assert.doesNotMatch(prompt, /"parameters":/)
+  } finally {
+    complete._transport = saved
+  }
+})
+
+test("a widget request gets the Kimi built-in skill adaptation", async () => {
+  const { complete } = await import("../src/kimi-api.mjs")
+  const saved = complete._transport
+  let prompt = ""
+  complete._transport = async function* (opts) {
+    prompt = opts.prompt
+    yield { block: { id: "1", text: { content: "ok" } } }
+    yield { status: "FINISHED" }
+  }
+  try {
+    await loaderFetch([{ role: "system", content: "Skill: /app/.agents/skills/kimi-widget/SKILL.md" }, { role: "user", content: "把北京天气做成一个组件卡片" }]).then((r) => r.text())
+    assert.match(prompt, /运行环境校正/)
+    assert.match(prompt, /kimi-widget/)
+  } finally {
+    complete._transport = saved
+  }
+})

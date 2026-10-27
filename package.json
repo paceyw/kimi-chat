@@ -1,7 +1,7 @@
 {
   "name": "kimi-chat",
-  "version": "0.4.3",
-  "description": "Kimi Chat (kimi.com web account) in magpie — streaming chat, reasoning tiers, web search with citations, client tool calls and monthly quota on your own subscription",
+  "version": "0.5.0",
+  "description": "Kimi Chat (kimi.com web account) in magpie — streaming chat, reasoning tiers, web search with citations, compact client tool calls, Kimi web-skill adaptation and monthly quota on your own subscription",
   "type": "module",
   "main": "./src/index.mjs",
   "exports": {
@@ -41,7 +41,7 @@
     "maxConcurrency": 2
   },
   "scripts": {
-    "check": "node --check src/index.mjs && node --check src/config.mjs && node --check src/openai.mjs && node --check src/stream.mjs && node --check src/kimi-api.mjs && node --check src/kimi-connect.mjs && node --check src/models.mjs && node --check src/tools.mjs && node --check src/login.mjs && node --check src/usage.mjs && node --check src/ui-protocol.mjs && node --check src/tokens.mjs",
+    "check": "node --check src/index.mjs && node --check src/config.mjs && node --check src/openai.mjs && node --check src/stream.mjs && node --check src/kimi-api.mjs && node --check src/kimi-connect.mjs && node --check src/models.mjs && node --check src/tools.mjs && node --check src/skills.mjs && node --check src/login.mjs && node --check src/usage.mjs && node --check src/ui-protocol.mjs && node --check src/tokens.mjs",
     "test": "node --test",
     "test:check": "npm run check && npm test"
   }

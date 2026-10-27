@@ -294,9 +294,35 @@ curl -s http://127.0.0.1:<端口>/v1/models | grep kimi   # 网关侧应能看�
 
 上游没有 OpenAI 的 `tools/tool_calls` 通道，故这一层由插件模拟：
 
-- 请求：`src/tools.mjs` 把 `body.tools` 渲染成提示词里的调用说明（名字/描述/JSON Schema），并声明用 `<tool_call>{"name":…,"arguments":{…}}</tool_call>` 输出。
+- 请求：`src/tools.mjs` 把 `body.tools` 渲染成提示词里的调用说明（名字/签名/一句描述），并声明用 `<tool_call>{"name":…,"arguments":{…}}</tool_call>` 输出。
 - 响应：流式路径按"可能被帧切断"的方式缓冲，遇到闭合标签才产出 `choices[].delta.tool_calls[]`（`index/id/function.name/arguments`）；非流式路径产出 `message.tool_calls[]` + `finish_reason="tool_calls"`。
 - 客户端把 `role:"tool"` 结果回传时，`toPrompt` 渲染成自然语言（`[tool result] …`），绝不复述 XML 标签——早期版本直接拼 `<tool_call>`，模型会照抄成正文。
+
+### 11.1 工具手册的渲染格式与预算（2026-10-27）
+
+默认 `compact` 渲染，一行一个工具：
+
+```
+- fs_read(path*:str, offset:int, limit:int): Read an existing file before overwriting it with write.
+```
+
+- 签名取自 `parameters.properties`：`*` 标必填（`required`），类型缩写 `str/num/int/bool/arr/obj/null`，字符串枚举 ≤4 个时直接写 `"a"|"b"`，参数多于 8 个时截断为 `+N`。
+- 说明只保留第一句（首个 `.`/`。`/`!`/`？`/`；` 结尾），并砍掉各家客户端的 `Calling convention:` / `调用约定:` 之后那段 run_code 样板（与选工具无关）。单条上限 160 字。
+- 预算默认 48,000 字符（`KIMI_TOOLS_MAX_CHARS`，`0` 关闭）。超预算按阶梯**整体缩短**说明：160 → 120 → 96 → 72 → 56 → 40 字；仍超才从最长的行开始退到"只有名字"；再超就按 `mcp__server__*` 前缀合并成一行。
+- **工具名永不丢弃**：预算是软目标，名字消失等于工具不存在（模型会转而脑补不存在的工具）。
+- 真机数据（DSH 声明 305 个工具）：完整 schema 330,230 字符 → 默认预算下 45,381 字符（7 倍）。
+- `KIMI_TOOLS_MODE=full` 回到完整 JSON schema 渲染（旧行为，仅排查用）。
+
+### 11.2 网页端内置技能的适配（2026-10-27，`src/skills.mjs`）
+
+Kimi 网页/桌面容器内挂 `/app/.agents/skills/<name>/SKILL.md`。经 OpenAI 兼容通道调用时该路径不存在（真机 `read` 返回 `FS_NOT_FOUND`），且失败后模型常"顺着错思路"只吐思考不吐正文（会话 `session-72ea02fe…` 的空白回答）。插件按需在提示词最前面插入两段：
+
+| 触发 | 注入内容 |
+| --- | --- |
+| 提示词中出现 `/app/.agents/skills` 或 `SKILL.md` | 环境校正：不是 Kimi 容器、没有该目录、不要为读规范去调工具、不要照抄 `/app/...` 路径 |
+| 最后一条用户消息含「卡片/组件/看板/仪表盘/widget/card/dashboard」且客户端未提供 `show_widget`/`render_widget`/`artifact` 类工具 | 追加 `kimi-widget` 等价做法：自包含 HTML、全内联样式、先取数再一次性出卡片、卡片外最多一句说明 |
+
+`KIMI_WEB_SKILLS=0` 关闭整段注入。客户端自带 widget/artifact 工具时只注入第一条，避免与真实渲染能力冲突。
 
 ## 12. 参数刻度实测（2026-10-27，真机）
 
