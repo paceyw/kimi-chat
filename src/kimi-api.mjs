@@ -168,17 +168,24 @@ function effortValue(v) {
 }
 
 // 按模型允许集合夹取：
-//   集合内 → 原样透传；超过上界 → 夹到上界（Instant 传 7 → 5）；
-//   其余（非法、低于下界、档位不在集合里）→ 走 fallback（档位语义默认），fallback 为 undefined
-//   时干脆不发该字段，交给上游默认——绝不把非法枚举送给上游（那样是整请求报错，不是回落默认）。
+//   集合内 → 原样透传；
+//   档位落在集合两点之间（OpenAI 的 medium(4) 就在 3/5 之间）→ 取最近的一档，并列取高档；
+//   超过上界 → 夹到上界（Instant 传 7 → 5）；
+//   低于下界或非法 → 走 fallback（档位语义默认），fallback 为 undefined 时干脆不发该字段，
+//   交给上游默认——绝不把非法枚举送给上游（那样是整请求报错，不是回落默认）。
 function clampEffort(value, allowed, fallback) {
   const raw = effortValue(value)
   const set = Array.isArray(allowed) && allowed.length ? allowed : REASONING_EFFORTS
-  const max = Math.max(...set)
   if (raw === undefined) return fallback
   if (set.includes(raw)) return raw
+  const asc = [...set].sort((a, b) => a - b)
+  const min = asc[0]
+  const max = asc[asc.length - 1]
   if (raw > max) return max
-  return fallback
+  if (raw < min) return fallback
+  let best = asc[0]
+  for (const v of asc) if (Math.abs(v - raw) <= Math.abs(best - raw)) best = v
+  return best
 }
 
 export function tierToRequest(tier, prompt, { sessionId, search, searchForce, reasoningEffort, models, speed, contextLength, spec }) {

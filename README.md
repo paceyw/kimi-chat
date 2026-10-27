@@ -6,7 +6,7 @@
 - 供应商 id：`kimi-chat`（客户端里写作 `kimi-chat/kimi-fast` 这样）
 - 上游：`https://www.kimi.com/apiv2`（connect-rpc over protobuf，私协议，见 [PROTOCOL.md](PROTOCOL.md)）
 - 能力：流式对话、思考档、联网搜索 + 引用、客户端工具调用（`tools`）、生成式 UI 事件、月额度与费用估算、token 用量（估算，见下）
-- 当前版本：**0.4.0**（变更见 [CHANGELOG.md](CHANGELOG.md)）；Node ≥ 20.3，无运行时依赖，纯 ESM
+- 当前版本：**0.4.2**（变更见 [CHANGELOG.md](CHANGELOG.md)）；Node ≥ 20.3，无运行时依赖，纯 ESM
 
 ## 安装
 
@@ -111,21 +111,21 @@ magpie quota                              # 应出现「月额度」窗口与剩
 | `kimi-agent` | Agent（`scenario=OK_COMPUTER`）+ 插件能力 | 低 / 高 / 最高 | 联网、工具、时间线 |
 | `kimi-<slug>` | 上游返回的其它模型（如 K3.1 Pro / K2.8 Preview） | 低 / 高 / 最高 | 由 `display_name` 派生，不覆盖上面三档 |
 
-思考档通过 `reasoning_effort` 传（`low`/`high`/`medium`/`max` 或 `3`/`5`/`7`，按模型支持的档位夹取；Instant 只有低/高）。
+思考档通过 `reasoning_effort` 传：`low`/`medium`/`high`/`xhigh`/`max`（=3/4/5/6/7）或直接给数字。插件按该模型真实支持的档位夹取：落在两档之间的（如 `medium`=4）取最近的一档，并列取高档；超过上界夹到上界；低于下界（`minimal` 及以下）视为“不要思考”，不发这个字段。Instant 只有低(3)/高(5)，其余模型三档齐全。
 **给了档位就会把上游的思考打开**：Instant 的「思考」和服务端联网搜索是同一个开关——思考关着时，上游不会给这次请求挂 `web_search` 工具（即使请求里显式要求联网），模型也就只能回答“我没有实时数据”。所以想让快速档联网，就传一个思考档；不想思考就不要传。
-模型支持推理时，这些档位就是 magpie 里的推理档（`variants`），客户端也可以直接传 `kimi-chat/kimi-fast` 这样的 `provider/model`。
+注意：magpie 的「推理档（variants）」取自它自己的 models.dev 目录，插件能上报的只有 `reasoning` 布尔，所以 `kimi-chat/*` 在 `/v1/models` 里的 `supported_reasoning_levels` 是空数组——档位要由客户端在请求里显式传 `reasoning_effort`（`provider/model` 的写法照常用）。
 
-一个已登录账号通常能看到 7 个入口（随上游返回变化，缓存 10 分钟）：
+一个已登录账号通常能看到 7 个入口（随上游返回变化，缓存 10 分钟）。「网页里叫」是 Chat 前端模型菜单里的名字：
 
-| 入口 | 上游 | 思考档 |
-|---|---|---|
-| `kimi-fast` | Instant（`k2d6-chat` / `k28-instant`） | 低 / 高 |
-| `kimi-thinking` | Agent（`k3-agent`）+ `thinking=true` | 低 / 高 / 最高 |
-| `kimi-agent` | Agent（`scenario=OK_COMPUTER`）+ 插件能力 | 低 / 高 / 最高 |
-| `kimi-k3d1-agent` | K3.1 Pro（默认 Agent 模型） | 低 / 高 / 最高 |
-| `kimi-k2d8-preview` | K2.8 Preview（Work 场景 id） | 低 / 高 / 最高 |
-| `kimi-k28-instant` | Instant 的动态入口（`key=k28-instant`） | 低 / 高 |
-| `kimi-k3` | K3（`kimi_plus_id=ok-computer`） | 低 / 高 / 最高 |
+| 入口 | 网页里叫 | 上游 id / 场景 | 思考档 | 估算单价 ¥/1M（入/出） |
+|---|---|---|---|---|
+| `kimi-fast` | 快速（Instant） | `k28-instant`，CHAT(1) | 低 / 高 | 2 / 8 |
+| `kimi-k28-instant` | 快速（Instant 动态入口） | `k28-instant`，CHAT(1) | 低 / 高 | 2 / 8 |
+| `kimi-thinking` | 思考（K3 + thinking） | `k3-agent`，OK_COMPUTER(6) | 低 / 高 / 最高（默认高） | 8 / 32 |
+| `kimi-agent` | Agent | `k3-agent`，OK_COMPUTER(6) + 插件能力 | 低 / 高 / 最高 | 8 / 32 |
+| `kimi-k3d1-agent` | K3.1 Pro | `k3d1-agent`，OK_COMPUTER(6) | 低 / 高 / 最高 | 8 / 32 |
+| `kimi-k2d8-preview` | K2.8（Work 里叫 K2.8 Preview） | `k2d8-preview`，OK_COMPUTER(6) | 低 / 高 / 最高 | 4 / 16 |
+| `kimi-k3` | K3 | `k3`，OK_COMPUTER(6) | 低 / 高 / 最高 | 8 / 32 |
 
 其它固定事实（实测，见 PROTOCOL.md §12）：
 
@@ -163,7 +163,7 @@ magpie quota                              # 应出现「月额度」窗口与剩
 
 ```bash
 npm run check     # 13 个源文件语法检查
-npm test          # 单元测试（12 个文件 / 103 条，全部离线：假 transport，不需要登录、不打真实网络）
+npm test          # 单元测试（12 个文件 / 106 条，全部离线：假 transport，不需要登录、不打真实网络）
 ```
 
 测试覆盖：wire 级 protobuf 编解码、Chat 流解析、工具调用标记切分、登录输入解析（含中文提示文案）、模型目录映射、思考档夹取、token 估算、逐帧取证、用量换算、UI 事件信封、多轮会话映射。

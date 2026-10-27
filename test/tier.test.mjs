@@ -40,3 +40,20 @@ test("dynamic spec: without effort the catalog's thinking flag wins", () => {
   assert.equal(req.options.thinking, true)
   assert.equal(req.kimiplusId, "ok-computer")
 })
+
+test("fast tier: OpenAI's medium (4) snaps to the nearest Instant level and thinks", () => {
+  const req = tierToRequest("fast", "hi", { reasoningEffort: "medium", models })
+  assert.equal(req.options.reasoningEffort, 5)
+  assert.equal(req.options.thinking, true)
+})
+
+test("fast tier: below the Instant range is not sent at all", () => {
+  const req = tierToRequest("fast", "hi", { reasoningEffort: "minimal", models })
+  assert.equal(req.options.reasoningEffort, undefined)
+  assert.equal(req.options.thinking, undefined)
+})
+
+test("agent tiers: xhigh (6) snaps up to max (7)", () => {
+  const req = tierToRequest("thinking", "hi", { reasoningEffort: "xhigh", models })
+  assert.equal(req.options.reasoningEffort, 7)
+})
