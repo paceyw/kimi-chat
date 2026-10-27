@@ -6,10 +6,10 @@
 //     ratelimitCode7d: { ratio, enabled, resetTime },     // 每周限流窗口
 //     subscriptionBalance: { amountUsedRatio, expireTime, kimiCodeUsedRatio, ... }  // 月额度
 //   }
-// 只对外输出**月额度**一个窗口：用户要的就是"这个月花了多少 / 还剩多少"。
+// 只对外输出**月额度**一个窗口：回答"这个月花了多少 / 还剩多少"。
 // ratelimitCode5h/7d 是限流器的内部计数（高频请求时才会动），展示出来只会误导，故直接不映射。
 // magpie 的 usage 契约里 windows[].used 是"百分比 0–100"，所以这里要 ×100。
-// 金额换算用月套餐价（默认 ¥199），只作展示，不参与任何限流判断。
+// 金额换算用套餐价（环境变量 KIMI_PLAN_CNY，默认 199），只作展示，不参与任何限流判断。
 
 export const DEFAULT_PLAN_CNY = 199
 
@@ -28,7 +28,7 @@ export function toUsageReport(stats, { priceCny = DEFAULT_PLAN_CNY, planName = "
       name: "月额度",
       used: usedPct,
       resetsAt: sb.expireTime || undefined,
-      // 用户要的就是"百分比 ≈ 多少钱"，直接把两项都摊开，省得再算
+      // 同时给出"百分比 ≈ 多少钱"，省得客户端再算
       display: `已用 ${usedPct.toFixed(2)}% ≈ ¥${spent.toFixed(2)} / ¥${priceCny}`,
     })
     balance = `月额度剩余 ${(100 - usedPct).toFixed(2)}%（≈¥${left.toFixed(2)} / ¥${priceCny}）`
@@ -67,7 +67,7 @@ export function recentUsageLine(actions, { priceCny = DEFAULT_PLAN_CNY } = {}) {
   const ratio = ratioOf(a) ?? 0
   const pct = (ratio * 100).toFixed(2)
   const yuan = Number.isFinite(priceCny) && priceCny > 0 ? `（≈¥${(ratio * priceCny).toFixed(2)}）` : ""
-  // title 本身已带档位前缀（如 "Instant: xxx"），不要再拼 feature
+  // title 本身已带档位前缀（如 "<tier>: xxx"），不要再拼 feature
   const title = String(a.title ?? a.name ?? "").trim()
   return `最近一次用量：${title || "未命名会话"} ${pct}%${yuan}`
 }

@@ -149,12 +149,12 @@ Usage 限流类 → magpie rate_limited；CONTENT_FILTER → content_filter；CH
 令牌都是 HS512 JWT（解 payload 不验签即可用）：
 
 ```json
-{"iss":"account","aud":["kimi.com"],"exp":1793062986,"typ":"access","sub":"<userId>","abstract_user_id":"<userId>","membership":{"level":25}}
+{"iss":"account","aud":["kimi.com"],"exp":1793062986,"typ":"access","sub":"<userId>","abstract_user_id":"<userId>","membership":{"level":<n>}}
 ```
 
 - `typ` = `access` / `refresh` → 用来判断用户粘错没粘错；
 - `sub` = userId → 账号归属与 `X-Traffic-Id` 的来源；
-- `membership.level` = 25 → 解释了为什么 XL 上下文（需 27）被 `permission_denied`。
+- `membership.level` = 账号会员等级（各账号不同）→ 等级不足时超长上下文会以 `permission_denied` 被拒。
 - `RefreshTokenResponse` 只有 `access_token=1` / `refresh_token=2`，**没有 user_id**（有 user_id 的只有 `LoginWithSMS/ThirdParty/OneClick/GetLoginQRCodeStatus`），所以网页登录必须从 JWT 里取 userId。
 
 登录页可用性（2026-10-27）：`/` 200、`/login` 200、`/signin` 302→`/`；`kimi.moonshot.cn` 302→`www.kimi.com`。
@@ -258,17 +258,17 @@ curl -s http://127.0.0.1:<端口>/v1/models | grep kimi   # 网关侧应能看�
 | 参数 | 请求字段 | 可用值 | 实测被拒的值 |
 | --- | --- | --- | --- |
 | 思考强度 | `options.reasoningEffort` (8) | 3=LOW、5=HIGH、7=MAX | —（未发现拒绝） |
-| 对话长度 | `options.contextLength` (9) | 5=L（本账号上限） | 6 → `connect stream error`；7 → `Invalid parameter` |
+| 对话长度 | `options.contextLength` (9) | 5=L（标准档；插件固定使用） | 6 → `connect stream error`；7 → `Invalid parameter`（更高档位需要账号权限，插件不做选项） |
 | 速度 | `options.speed` (15) | 1=Standard、5=Fast | 3、7 → `enum.defined_only`；10 → `Invalid parameter` |
 
 要点：
 - `Model.speed_options` 里出现的 1/3/5/7 是**展示刻度**，不能回填 `options.speed`（3/7 会被上游拒）。这条曾导致一次误判：探针把 7 传进去却被插件丢弃，回落到 5，看起来"7 也能用"。
-- 对话长度受套餐限制，超限值只能丢弃（回落服务端默认），否则整轮请求失败——实现里用 `KIMI_MAX_CONTEXT_LENGTH`（默认 5）做上限。
+- 对话长度受账号权限限制，超限值只能丢弃（回落服务端默认），否则整轮请求失败——实现里用 `KIMI_MAX_CONTEXT_LENGTH`（默认 5）做上限。插件默认不做这个选项：超长上下文消耗成倍增长，且几乎没有客户端能传该参数。
 - 客户端可用 `reasoning_effort` / `speed` / `context_length` 覆盖；非法值静默丢弃，绝不发给上游。
 
 ### 12.1 思考档位矩阵（2026-10-27 用户前端确认）
 
-用户在前端把四个模型的思考档位逐个点开核对，结论是**按模型分两档集合**：
+逐个模型对照网页前端的思考档位核对，结论是**按模型分两档集合**：
 
 | 模型 | `model_id` | `scenario` | 思考档位（`options.reasoningEffort`） |
 | --- | --- | --- | --- |
@@ -279,11 +279,12 @@ curl -s http://127.0.0.1:<端口>/v1/models | grep kimi   # 网关侧应能看�
 
 配套结论：
 
-- **对话长度不做选项**：本套餐只有 L(5)（超长档不可用，见 §12 的 `contextLength` 实测），
-  仍由 `KIMI_MAX_CONTEXT_LENGTH`（默认 5）兜上限，不暴露给客户端。
-- **速度不做选项**：只有 1=Standard / 5=Fast，且仅 K3.1 Pro 有；保持现状默认值（各档显式钉 FAST(5)）。
+- **对话长度不做选项（产品决策）**：默认固定 L(5)。超长档位消耗成倍增长、适配的客户端极少，
+  需要时由运维用 `KIMI_MAX_CONTEXT_LENGTH` 调上限（受账号权限限制，见 §12 的 `contextLength` 实测），不暴露给客户端。
+- **速度不做选项（产品决策）**：请求枚举只接受 1=Standard / 5=Fast（3/7/10 会被上游拒，见 §12），更快的档位与更高消耗绑定、
+  且只有部分模型提供；各档显式钉 FAST(5)，不暴露开关。
 - **套餐名接口**：`POST /apiv2/kimi.gateway.membership.v2.MembershipService/GetSubscription`
-  （Connect-JSON，请求体 `{}`）→ `subscription.goods.title`。套餐名取 `subscription.goods.title`（示例 `<plan name>`，月付 ¥199），
+  （Connect-JSON，请求体 `{}`）→ `subscription.goods.title`。套餐名取 `subscription.goods.title`（各账号/地区返回值不同），
   用于 `auth.usage` 的 `plan` 字段（见 §14）。
 - **实现**：`buildCatalog` 给每个模型与 spec 带 `reasoningEfforts`（Instant=[3,5]，其余=[3,5,7]），
   `tierToRequest` 按该集合夹取——集合内原样透传、超上界夹到上界（Instant 传 7 → 5）、
@@ -340,11 +341,11 @@ magpie 里 `kimi-chat` 的模型列表不再是三档硬编码，而是"三档�
 
 插件映射（`src/usage.mjs` → `auth.usage`）：
 
-- `plan` = 套餐名 + 价格：`<plan name>（月付 ¥199）`（套餐名取 `GetSubscription.subscription.goods.title`，
-  拿不到退回 `Kimi 会员（月付 ¥199）`；价格可用环境变量 `KIMI_PLAN_CNY` 覆盖）
-- `balance` = `月额度剩余 <pct>%（≈¥<amount> / ¥199）`
-- `windows[]` = **只有月额度一项**（`used` 为百分比，带 `display` 文本 `已用 <pct>% ≈ ¥<amount> / ¥199`）；
-  `ratelimitCode5h/7d` 是限流器内部计数，用户明确不要，故不映射
+- `plan` = 套餐名 + 价格：`<plan name>（月付 ¥<price>）`（套餐名取 `GetSubscription.subscription.goods.title`，
+  拿不到退回 `Kimi 会员`；价格由环境变量 `KIMI_PLAN_CNY` 设置，默认 199，仅用于把额度百分比折算成金额）
+- `balance` = `月额度剩余 <pct>%（≈¥<amount> / ¥<price>）`
+- `windows[]` = **只有月额度一项**（`used` 为百分比，带 `display` 文本 `已用 <pct>% ≈ ¥<amount> / ¥<price>`）；
+  `ratelimitCode5h/7d` 是限流器内部计数，不作为面向用户的展示项，故不映射
 - `user` = 会话映射数（`<n> active / <m> mapped session(s)`），不再拼接"最近一次用量"
 
 套餐名接口（实测，Connect-JSON 同上）：

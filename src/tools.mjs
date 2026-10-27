@@ -4,7 +4,7 @@
 // 因此我们做两件事：
 //   1) 把客户端声明的工具渲染成提示词里的一段"工具手册"，规定唯一输出格式；
 //   2) 从模型正文里把 <tool_call>{...}</tool_call> 抠出来，转成 OpenAI tool_calls。
-// 这样可以跑通 DSH / 任意 OpenAI 客户端的工具循环，而不依赖上游私有工具系统。
+// 这样可以在任意 OpenAI 兼容客户端里跑通工具循环，而不依赖上游私有工具系统。
 
 export const TOOL_CALL_OPEN = "<tool_call>"
 export const TOOL_CALL_CLOSE = "</tool_call>"

@@ -190,9 +190,9 @@ export function tierToRequest(tier, prompt, { sessionId, search, searchForce, re
   const speedAllowed = new Set([SPEED.STANDARD, SPEED.FAST])
   const speedRaw = pickEnum(SPEED, speed)
   const speedEnum = speedAllowed.has(speedRaw) ? speedRaw : undefined
-  // 对话长度受账号套餐限制：2026-10-27 实测该档位最高 L(5)——6 → connect stream error，
-  // 7 → "Invalid parameter"。超限值一律不发（宁可回落服务端默认，也不让整轮失败）。
-  // 其它套餐账号可用 KIMI_MAX_CONTEXT_LENGTH 上调上限。
+  // 对话长度：默认固定 L(5)、不对客户端开放——超长档位消耗成倍增长，且几乎没有客户端能传该参数。
+  // 上游对无权使用的档位直接报错（6 → connect stream error，7 → "Invalid parameter"），
+  // 所以超上限值一律丢弃（回落服务端默认，不让整轮失败）；需要时由 KIMI_MAX_CONTEXT_LENGTH 调上限。
   const contextCap = Number(process.env.KIMI_MAX_CONTEXT_LENGTH ?? CONTEXT_LENGTH.L)
   const contextRaw = pickEnum(CONTEXT_LENGTH, contextLength)
   const contextEnum = contextRaw && contextRaw <= contextCap ? contextRaw : undefined

@@ -603,7 +603,7 @@ test("tierToRequest maps model tiers to ChatRequest options", async () => {  con
   const tunedJunk = tierToRequest("kimi-thinking", "hi", { speed: "warp", contextLength: "gigantic" })
   assert.equal(tunedJunk.options.speed, 5) // thinking 钉住默认 FAST，非法覆盖被丢弃
   assert.equal(tunedJunk.options.contextLength, undefined)
-  // 网页上确有"极致/XXL"选项，但本账号实测会被上游拒 → 超上限值静默丢弃而非整轮失败
+  // 网页上确有"极致/XXL"选项，但实测会被上游拒 → 超上限值静默丢弃而非整轮失败
   const tunedOverCap = tierToRequest("kimi-thinking", "hi", { speed: 10, contextLength: "xxl" })
   assert.equal(tierToRequest("kimi-thinking", "hi", { speed: 7 }).options.speed, 5) // 7 被拒 → 回落默认 FAST
   assert.equal(tunedOverCap.options.speed, 5)

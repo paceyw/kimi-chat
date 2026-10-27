@@ -442,7 +442,7 @@ export const server = async () => {
       // 订阅用量：magpie 设置页会展示 plan / until / balance / windows。
       // 只读 MembershipService 的两个接口（不是 token 计数，也不是聊天帧里的 usage）：
       //   GetSubscriptionStats → 月额度百分比；GetSubscription → 套餐名（goods.title）。
-      // windows 只有月额度一项：5 小时/每周限流计数不对外展示（用户明确不要）。
+      // windows 只有月额度一项：5 小时/每周限流是限流器内部计数，不作为展示项。
       async usage(getAuth) {
         const mapped = [...sessions.values()]
         const now = Date.now()
@@ -466,7 +466,7 @@ export const server = async () => {
             }
           }
           const stats = await call((a) => getSubscriptionStats(a, { signal: timeout() }))
-          // 套餐名拿不到不算错误：退回泛称「Kimi 会员（月付 ¥199）」
+          // 套餐名拿不到不算错误：退回泛称「Kimi 会员」
           const sub = await call((a) => getSubscription(a, { signal: timeout() })).catch(() => null)
           const planName = String(sub?.subscription?.goods?.title ?? "").trim()
           return { ...toUsageReport(stats, { priceCny, planName }), user: sessionLine }
