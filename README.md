@@ -6,7 +6,7 @@
 - 供应商 id：`kimi-chat`（客户端里写作 `kimi-chat/kimi-fast` 这样）
 - 上游：`https://www.kimi.com/apiv2`（connect-rpc over protobuf，私协议，见 [PROTOCOL.md](PROTOCOL.md)）
 - 能力：流式对话、思考档、联网搜索 + 引用、客户端工具调用（`tools`）、生成式 UI 事件、月额度与费用估算、token 用量（估算，见下）
-- 当前版本：**0.4.2**（变更见 [CHANGELOG.md](CHANGELOG.md)）；Node ≥ 20.3，无运行时依赖，纯 ESM
+- 当前版本：**0.4.3**（变更见 [CHANGELOG.md](CHANGELOG.md)）；Node ≥ 20.3，无运行时依赖，纯 ESM
 
 ## 安装
 
@@ -133,7 +133,9 @@ magpie quota                              # 应出现「月额度」窗口与剩
 - **速度**：**默认不支持选择**，固定用上游的 FAST 档（请求枚举 5）。更快的档位与更高消耗绑定、且只有部分模型提供，客户端也很少能传这个参数，所以不做开关。
 - **客户端工具**：不是上游一等能力，但插件支持：把请求里的 `tools` 渲染成提示词里的工具手册，再把模型输出的 `<tool_call>` 还原成 OpenAI `tool_calls`（`finish_reason: "tool_calls"`），能力位因此报 `toolcall: true`。复杂工具流建议用 Agent 档。
 - **联网搜索**：默认开启，搜索结果以 `search-results` UI 事件 + `annotations` 引用返回；`search_enabled: false` 可关。注意上面那条：快速档要先开思考，服务端才会真的挂 `web_search`。
-- **标题类请求**：客户端发来「给会话起标题」的请求（system 里带 `Create a concise title…`）时，插件自动关掉思考与联网搜索——这类请求不需要工具，开着只是白花额度。
+- **标题类请求**：客户端发来「给会话起标题」的请求（system 里带 `Create a concise title…`）时，插件自动关掉思考与联网搜索——这类请求不需要工具，开着只是白花额度；同一个 magpie 会话的标题请求还会复用同一个上游 chat，不会在 Kimi 网页里变成一串多余的「会话」。
+- **空回答补偿**：上游偶尔会在思考后直接停下（`finish=stop`、正文为空、没有工具调用）。插件会自动在同一会话里把「请直接给出最终答复」再说一遍、重问一次；第二次的思考不重复推给客户端。第二次仍为空才把空结果交回去。
+  这类请求客户端自己也会重试（实测某客户端重发一次、prompt 多 8 个 token），插件先补一次等于替客户端省掉一轮完整费用。
 - **生成式 UI**：搜索/引用/时间线/产物以 `agent-timeline`、`citation-list`、`preview-card` 等白名单组件的事件流输出（Agent UI Protocol v1），未适配的客户端只看到文本 + 工具调用。
 
 ## 用量与费用
@@ -163,10 +165,10 @@ magpie quota                              # 应出现「月额度」窗口与剩
 
 ```bash
 npm run check     # 13 个源文件语法检查
-npm test          # 单元测试（12 个文件 / 106 条，全部离线：假 transport，不需要登录、不打真实网络）
+npm test          # 单元测试（12 个文件 / 110 条，全部离线：假 transport，不需要登录、不打真实网络）
 ```
 
-测试覆盖：wire 级 protobuf 编解码、Chat 流解析、工具调用标记切分、登录输入解析（含中文提示文案）、模型目录映射、思考档夹取、token 估算、逐帧取证、用量换算、UI 事件信封、多轮会话映射。
+测试覆盖：wire 级 protobuf 编解码、Chat 流解析、工具调用标记切分、登录输入解析（含中文提示文案）、模型目录映射、思考档夹取、token 估算、逐帧取证、空回答补偿重试、标题会话复用、用量换算、UI 事件信封、多轮会话映射。
 CI 在 Node 20 / 22 / 24 上跑同一套（`.github/workflows/test.yml`）。本地不需要 `npm install`（零依赖），也不需要登录 Kimi。
 
 ### 抓一份逐帧日志（可选）

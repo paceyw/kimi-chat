@@ -986,3 +986,71 @@ test("streaming without include_usage sends no usage frame", async () => {
   const text = await response.text()
   assert.ok(!text.includes("\"usage\""), "unasked clients must not receive the extra frame")
 })
+
+test("empty answer: a reasoning-only turn is retried once with a nudge", async () => {
+  const { complete } = await import("../src/kimi-api.mjs")
+  const saved = complete._transport
+  const prompts = []
+  complete._transport = async function* ({ prompt }) {
+    prompts.push(prompt)
+    yield { block: { id: "1", think: { content: "先想一下" } } }
+    if (prompts.length > 1) yield { block: { id: "2", text: { content: "答案在这里" } } }
+    yield { status: "FINISHED" }
+  }
+  try {
+    const response = await loaderFetch([{ role: "user", content: "hi" }], { stream: true })
+    const text = await new Response(response.body).text()
+    const frames = text.split("\n\n").filter((f) => f.startsWith("data: ") && !f.includes("[DONE]")).map((f) => JSON.parse(f.slice(6)))
+    const content = frames.map((f) => f.choices?.[0]?.delta?.content ?? "").join("")
+    const reasoning = frames.map((f) => f.choices?.[0]?.delta?.reasoning_content ?? "").join("")
+    assert.equal(content, "答案在这里")
+    assert.equal(reasoning, "先想一下", "the retry must not repeat the reasoning it already streamed")
+    assert.equal(prompts.length, 2, "exactly one automatic retry")
+    assert.match(prompts[1], /请直接在正文里给出最终答复/)
+  } finally {
+    complete._transport = saved
+  }
+})
+
+test("empty answer: an always-empty turn is retried only once", async () => {
+  const { complete } = await import("../src/kimi-api.mjs")
+  const saved = complete._transport
+  let calls = 0
+  complete._transport = async function* () {
+    calls++
+    yield { block: { id: "1", think: { content: "只想了" } } }
+    yield { status: "FINISHED" }
+  }
+  try {
+    const response = await loaderFetch([{ role: "user", content: "hi" }], { stream: true })
+    await new Response(response.body).text()
+    assert.equal(calls, 2)
+  } finally {
+    complete._transport = saved
+  }
+})
+
+test("session titles share one upstream chat instead of one per turn", async () => {
+  const { complete } = await import("../src/kimi-api.mjs")
+  const saved = complete._transport
+  const seen = []
+  complete._transport = async function* ({ sessionId }) {
+    seen.push(sessionId ?? null)
+    yield { chat: { id: "kimi-title-chat" } }
+    yield { block: { id: "1", text: { content: "标题" } } }
+    yield { status: "FINISHED" }
+  }
+  try {
+    const titleMessages = (n) => [
+      { role: "system", content: "Create a concise title for an AI coding-assistant session. " + n },
+      { role: "user", content: "Generate the session title from this JSON array of human messages: []" },
+    ]
+    for (const n of [1, 2]) {
+      const response = await loaderFetch(titleMessages(n), { session: "s-title" })
+      assert.equal(JSON.parse(await response.text()).choices[0].message.content, "标题")
+    }
+    assert.deepEqual(seen, [null, "kimi-title-chat"], "the second title request continues the first title chat")
+  } finally {
+    complete._transport = saved
+  }
+})

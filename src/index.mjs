@@ -32,6 +32,17 @@ function evictSessions() {
 // 请求中途 401 刷新得到的新凭据，供 auth.refresh() 在下次 magpie 调用时持久化
 let pendingRefresh = null
 
+// 客户端「起标题」请求（system 里带 Create a concise title…）每轮都会发一次，而且消息前缀
+// 与正文不同——按普通会话逻辑会给它开一个新 chat，Kimi 网页里就会多出一个"会话"。
+// 这里按 magpie session 记一个专用的标题 chat：同一会话的标题请求都落在这一个 chat 里，
+// 每个会话最多只多出一个对话，而不是每轮一个。
+const titleSessions = new Map() // sessionId -> kimiChatId
+// 上游偶尔「只思考不回答」：思考块正常流完，finish=stop，正文一个字都没有
+// （2026-10-27 两个真机会话复现：工具报错之后问"用组件卡片展示"必现）。
+// 客户端遇到空正文通常会自己重试一次（实测 DSH 重发了一次、prompt 多 8 个 token），
+// 等于白花两轮钱；插件先在同一会话追加一句提醒重要一次，仍然为空才把空结果交回去。
+const EMPTY_ANSWER_NUDGE = "请直接在正文里给出最终答复，不要再只输出思考，也不要重复上面的过程。"
+
 // QR 登录用设备指纹：webId 每插件实例生成一次（存 auth metadata 由 authorize 写入），
 // ssid 每次登录随机。宿主 save() 把 authorize 结果的 refresh/access/expires 存为
 // {type:"oauth", refresh, access, expires}，loader 的 getAuth() 据此读取。
@@ -293,12 +304,21 @@ export const server = async () => {
 
             const id = `chatcmpl-${Math.random().toString(36).slice(2, 12)}`
             const created = Math.floor(Date.now() / 1000)
+            // 有些客户端（如 DSH）会额外发一次「给会话起标题」的请求，system 里带
+            // "Create a concise title…"。这种请求不需要思考、也不需要联网搜索：关掉既省额度，
+            // 也让上游少开一次 web_search 工具（标题质量不受影响）。
+            // 用原始 system 消息判断（此时还没压平 prompt，免得为找关键词拼一遍 300KB 正文）。
+            const utilityRequest = body.messages.some((m) =>
+              (m.role === "system" || m.role === "developer") && /create a concise title|generate the session title/i.test(messageText(m)))
             const sessionId = request.headers.get("x-magpie-session") || null
             const bound = sessionId ? sessions.get(sessionId) : null
             // 续聊条件：客户端重发的消息前缀与上一轮完全一致（全量重发模式）。
             // 前缀不匹配（客户端裁剪过历史/只发增量）→ 开新上游会话，全量压平，避免历史重复。
             const prefixMatch = !!(bound && bound.fingerprint === active && bound.prefixHash === prefixFingerprint(body.messages.slice(0, bound.consumedMessages)))
-            const useState = prefixMatch ? bound : null
+            // 标题请求：走该 magpie 会话专用的标题 chat（见 titleSessions 注释），
+            // 不复用正文会话、也不覆盖正文绑定，所以标题提示词不会污染用户能看到的那条对话。
+            const reuseState = titleSessions.get(sessionId) ? { kimiSessionId: titleSessions.get(sessionId), consumedMessages: 0 } : null
+            const useState = prefixMatch ? bound : (utilityRequest && sessionId ? reuseState ?? { consumedMessages: 0 } : null)
             const skip = useState?.consumedMessages ?? 0
             const head = skip > 0 ? body.messages.slice(0, skip).filter((m) => m.role === "system" || m.role === "developer") : []
             let tail = body.messages.slice(skip)
@@ -312,20 +332,16 @@ export const server = async () => {
             if (!prompt.trim()) return invalid("Kimi requires non-empty text")
             if (toolBlock) prompt = `${toolBlock}\n\n${prompt}`
             if (prompt.length > LIMITS.maxPromptCharacters) return invalid("Kimi prompt is too large")
-            // 有些客户端（如 DSH）会额外发一次「给会话起标题」的请求，system 里带
-            // "Create a concise title…"。这种请求不需要思考、也不需要联网搜索：关掉既省额度，
-            // 也让上游少开一次 web_search 工具（标题质量不受影响）。
-            const utilityRequest = /create a concise title|generate the session title/i.test(prompt)
             let step0 = {}
 
-            const run = async (emit) => {
+            const run = async (emit, promptOverride = prompt) => {
               let upstreamChatId = null, upstreamMessageId = null
               const iterator = complete({
                 origin: ORIGIN,
                 credentials,
                 tier: model.tier,
                 spec: catalog.specs[modelId],
-                prompt,
+                prompt: promptOverride,
                 sessionId: useState?.kimiSessionId ?? null,
                 search: !utilityRequest && body.search_enabled !== false,
                 // 思考档位：OpenAI 语义名（low/medium/high/max）、数字（3/5/7）都接受，
@@ -360,33 +376,60 @@ export const server = async () => {
                 requestAbort.signal.removeEventListener("abort", upstreamCancel)
                 await iterator.return?.()
               }
-              // 记录本轮已消费的消息数，供下一轮续聊裁剪；仅在同一会话指纹下生效
+              // 记录本轮已消费的消息数，供下一轮续聊裁剪；仅在同一会话指纹下生效。
+              // 标题请求只更新它自己的专用 chat，不动正文会话的绑定。
               if (sessionId && step0.sessionId) {
-                sessions.set(sessionId, { kimiSessionId: step0.sessionId, updatedAt: Date.now(), fingerprint: active, consumedMessages: body.messages.length, prefixHash: prefixFingerprint(body.messages) })
-                evictSessions()
+                if (utilityRequest) {
+                  titleSessions.set(sessionId, step0.sessionId)
+                  if (titleSessions.size > MAX_SESSIONS) {
+                    const oldest = [...titleSessions.keys()].slice(0, titleSessions.size - MAX_SESSIONS)
+                    for (const key of oldest) titleSessions.delete(key)
+                  }
+                } else {
+                  sessions.set(sessionId, { kimiSessionId: step0.sessionId, updatedAt: Date.now(), fingerprint: active, consumedMessages: body.messages.length, prefixHash: prefixFingerprint(body.messages) })
+                  evictSessions()
+                }
               }
             }
 
             if (body.stream === false) {
               try {
-                let text = "", reasoning = "", status = "FINISHED", events = [], citations = [], clientCalls = 0
-                await run((state) => { step0 = state; text = state.text; reasoning = state.reasoning; status = state.status ?? status; events.push(...(state.events ?? [])); if (state.citations?.length) citations = state.citations.slice() })
+                const collect = async (promptText) => {
+                  const out = { text: "", reasoning: "", status: "FINISHED", events: [], citations: [] }
+                  await run((state) => {
+                    step0 = state
+                    out.text = state.text
+                    out.reasoning = state.reasoning
+                    out.status = state.status ?? out.status
+                    out.events.push(...(state.events ?? []))
+                    if (state.citations?.length) out.citations = state.citations.slice()
+                  }, promptText)
+                  return out
+                }
+                let result = await collect(prompt)
+                // 只思考不回答：先自己重问一次（见 EMPTY_ANSWER_NUDGE 注释），别把空正文交给客户端。
+                const firstScanned = toolBlock ? scanToolCalls(result.text) : { text: result.text, calls: [] }
+                if (!firstScanned.text.trim() && !firstScanned.calls.length && !result.events.length && result.reasoning.trim() && !requestAbort.signal.aborted) {
+                  result = await collect(`${prompt}\n\n${EMPTY_ANSWER_NUDGE}`)
+                }
+                const { text, reasoning, status, events: uiEvents, citations } = result
                 const message = { role: "assistant", content: text }
                 if (reasoning) message.reasoning_content = reasoning
+                let clientCalls = 0
                 if (toolBlock) {
                   const scanned = scanToolCalls(text)
                   message.content = scanned.text
                   clientCalls = scanned.calls.length
                   if (clientCalls) message.tool_calls = scanned.calls.map((call, index) => toolCallDelta(call, index))
                 }
-                if (events.length) {
+                if (uiEvents.length) {
                   message.tool_calls ??= []
                   const base = message.tool_calls.length
-                  for (const [index, event] of events.entries()) message.tool_calls.push(uiToolCall(event, { index: base + index }))
+                  for (const [index, event] of uiEvents.entries()) message.tool_calls.push(uiToolCall(event, { index: base + index }))
                 }
                 if (citations.length) {
                   message.tool_calls ??= []
-                  message.tool_calls.push(uiToolCall(uiEventRaw("create", { surfaceId: "citations", itemId: "citations", seq: events.length, component: "citation-list", props: { citations } }), { index: message.tool_calls.length }))
+                  message.tool_calls.push(uiToolCall(uiEventRaw("create", { surfaceId: "citations", itemId: "citations", seq: uiEvents.length, component: "citation-list", props: { citations } }), { index: message.tool_calls.length }))
                   message.annotations = citations.map((c) => ({ type: "url_citation", url: c.url, title: c.title }))
                 }
                 const usage = buildUsage({ promptText: prompt, outputText: message.content ?? text, reasoningText: reasoning })
@@ -410,12 +453,13 @@ export const server = async () => {
               let sentText = 0, sentReasoning = 0, role = false, status = "FINISHED", uiIndex = 0, sentCitations = 0, citationsSeen = false, uiSeq = 0, sentCalls = 0, toolCallsSeen = false
               let finalText = "", finalReasoning = ""
               const seqNext = () => uiSeq++
-              try {
+              // 一次 upstream 请求的推送；重试时复用同一套 sent* 计数，避免重复发已经流出去的正文/思考。
+              const pump = async (promptText, { emitReasoning = true } = {}) => {
                 await run(async (state) => {
                   step0 = state
                   if (!role) { role = true; await write(chunk(id, created, modelId, { role: "assistant", content: "" })) }
                   status = state.status ?? status
-                  if (state.reasoning.length > sentReasoning) { const value = state.reasoning.slice(sentReasoning); sentReasoning = state.reasoning.length; await write(chunk(id, created, modelId, { reasoning_content: value })) }
+                  if (emitReasoning && state.reasoning.length > sentReasoning) { const value = state.reasoning.slice(sentReasoning); sentReasoning = state.reasoning.length; await write(chunk(id, created, modelId, { reasoning_content: value })) }
                   // 客户端工具：从累计正文里剥离 <tool_call> 块，正文照常流式，调用转成 tool_calls 增量
                   const scanned = toolBlock ? scanToolCalls(state.text) : { text: state.text, calls: [] }
                   finalText = scanned.text
@@ -441,7 +485,15 @@ export const server = async () => {
                     ), { index: uiIndex++ })] }))
                     citationsSeen = true
                   }
-                })
+                }, promptText)
+              }
+              try {
+                await pump(prompt)
+                // 只思考不回答（finish=stop、正文为空、没有工具调用）：同一会话里把要求再说一遍，
+                // 第二次的思考不再重复推给客户端（已经推过一次了），只等正文/工具调用。
+                if (!finalText.trim() && !toolCallsSeen && finalReasoning.trim() && !requestAbort.signal.aborted) {
+                  await pump(`${prompt}\n\n${EMPTY_ANSWER_NUDGE}`, { emitReasoning: false })
+                }
                 await write(chunk(id, created, modelId, {}, toolCallsSeen ? "tool_calls" : finishReason(status)))
                 if (includeUsage) await write(usageChunk(id, created, modelId, buildUsage({ promptText: prompt, outputText: finalText, reasoningText: finalReasoning })))
                 await write("data: [DONE]\n\n")

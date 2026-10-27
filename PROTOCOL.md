@@ -138,6 +138,16 @@ B 的关键帧（`op=1 set / 2 append`，`eventOffset` 单调递增）：
 - 思考档位只有**同时** `thinking=true` 时上游才会挂 `web_search`；低档（3）即使 `tools:[{Search:{force:true}}]` 也不搜（见 §12.1）。
 - 引用不是独立 Ref 块，而是正文里内嵌的 `\uE3A0…` 私有区码点 `<REF>` 标记，前端替换成上标，插件用 `sanitizeInlineRefs()` 转 `[n]`。
 - 取证开关：`KIMI_TRACE=1` 或 `KIMI_TRACE=<path>` 会把 request 摘要 + 每一帧原文 + end 摘要写成 jsonl（`src/kimi-api.mjs` 的 `openTrace`），用于复现以上结论。
+### 4.6 两个上游行为：只思考不回答 / 标题请求各开一个会话
+
+**（1）只思考不回答（empty answer）**。快速模型 + 进阶思考在「工具刚报错、紧接着要求排版一段结果」这类上下文里，会先正常流完一整段思考，然后 `finish=stop`、正文 0 字、也没有工具调用。2026-10-27 两个真机会话都复现：
+
+- 客户端视角：一轮思考动画播完，回答区是空的；客户端自己重发一次（台账里同一 step 出现两行，prompt 多 8 个 token），第二次仍是空的。
+- 直接打网关复现（同一段「工具返回 FS_NOT_FOUND → 请用组件卡片展示天气」的消息）：`finish=stop text=0 reasoning=87 toolDelta=0`、`finish=tool_calls text=0 reasoning=130`，两次都没有正文。
+- 插件现在的处理：正文为空、没有工具调用、但有思考时，在同一会话里追加一句「请直接在正文里给出最终答复，不要再只输出思考」再要一次（第二次的思考不再重复推给客户端）；第二次仍为空才返回空结果。宁可多花一轮小的，也不把空白丢给用户。
+
+**（2）标题请求各开一个会话**。客户端（如 DSH）每轮会额外发一次「给会话起标题」的请求，system 里带 `Create a concise title…`。它的消息前缀与正文不同，早期按普通会话逻辑处理，于是 Kimi 网页里每轮都会多出一个「Create a concise title…」开头的会话（用户看到「为什么有两个对话」）。现在按 magpie 会话记一个专用标题 chat `titleSessions`：同一会话的标题请求都续在同一个 chat 里，每会话最多多一个会话，且不覆盖正文会话的绑定。
+
 ## 5. 模型档映射（2026-10-26 无鉴权 GetAvailableModels 实测定稿）
 
 **实测方法**：`GetAvailableModels` 无需鉴权（空 body=默认场景）。返回 `default_chat_model="k2d6-chat"`、`default_agent_model="k3-agent"`。
