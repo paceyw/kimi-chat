@@ -15,10 +15,12 @@
   （真机 `read` 报 `FS_NOT_FOUND`），模型失败后常"顺着错思路"只思考不回答（见 `session-72ea02fe…`）。
   现在按需注入环境校正；当用户要「卡片/组件/看板」而客户端没有 widget/artifact 工具时，
   附上 `kimi-widget` 的等价做法（自包含 HTML + 全内联样式 + 先取数再出卡片）。`KIMI_WEB_SKILLS=0` 关闭。
+  触发只认 Kimi 容器真实路径（`/app/.agents/skills/`、`/app/skills/`）或 `kimi-widget`：DSH 的真实请求里 `SKILL.md`
+  出现 0 次，只有模型自己脑补时才出现，所以别家的"读 SKILL.md"约定不会被误伤。
 - 提示词前缀统一为「工具手册 + 技能适配 + 原提示词」，两者都只在需要时出现。
 - 测试：新增 `test/tools.test.mjs`（14 条：签名缩写、说明瘦身、预算降级、300 工具语料、标记切分容错）
-  与 `test/skills.test.mjs`（5 条）；`test/provider.test.mjs` 加 2 条（工具手册进入提示词、技能适配注入）。
-  全量 131 条通过，`npm run check` 覆盖 14 个源文件。
+  与 `test/skills.test.mjs`（6 条）；`test/provider.test.mjs` 加 2 条（工具手册进入提示词、技能适配注入）。
+  全量 131 条通过，`npm run check` 覆盖全部 16 个源文件。
 
 ## 0.4.3 — 2026-10-27
 

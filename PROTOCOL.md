@@ -311,6 +311,7 @@ curl -s http://127.0.0.1:<端口>/v1/models | grep kimi   # 网关侧应能看�
 - 预算默认 48,000 字符（`KIMI_TOOLS_MAX_CHARS`，`0` 关闭）。超预算按阶梯**整体缩短**说明：160 → 120 → 96 → 72 → 56 → 40 字；仍超才从最长的行开始退到"只有名字"；再超就按 `mcp__server__*` 前缀合并成一行。
 - **工具名永不丢弃**：预算是软目标，名字消失等于工具不存在（模型会转而脑补不存在的工具）。
 - 真机数据（DSH 声明 305 个工具）：完整 schema 330,230 字符 → 默认预算下 45,381 字符（7 倍）。
+- 真机闭环（`tools/probe-compact-live.mjs` / `tools/probe-tool-loop.mjs`，网关 `127.0.0.1:3425`，`kimi-fast` + `effort=low`）：305 工具请求 `http 200`、`usage.prompt_tokens=11,385`；单工具请求模型正确发出 `get_weather({"city":"北京","unit":"c"})`；把结果按 `role:"tool"` 回填后第二跳正常收尾（正文 53 字符 + 「16℃」）。
 - `KIMI_TOOLS_MODE=full` 回到完整 JSON schema 渲染（旧行为，仅排查用）。
 
 ### 11.2 网页端内置技能的适配（2026-10-27，`src/skills.mjs`）
@@ -319,10 +320,17 @@ Kimi 网页/桌面容器内挂 `/app/.agents/skills/<name>/SKILL.md`。经 OpenA
 
 | 触发 | 注入内容 |
 | --- | --- |
-| 提示词中出现 `/app/.agents/skills` 或 `SKILL.md` | 环境校正：不是 Kimi 容器、没有该目录、不要为读规范去调工具、不要照抄 `/app/...` 路径 |
+| 提示词中出现 Kimi 容器路径（`/app/.agents/skills/` 或 `/app/skills/`）或 `kimi-widget` | 环境校正：不是 Kimi 容器、没有该目录、不要为读规范去调工具、不要照抄 `/app/...` 路径；调用方自己声明的工具（含它自己的技能工具）照常可用 |
 | 最后一条用户消息含「卡片/组件/看板/仪表盘/widget/card/dashboard」且客户端未提供 `show_widget`/`render_widget`/`artifact` 类工具 | 追加 `kimi-widget` 等价做法：自包含 HTML、全内联样式、先取数再一次性出卡片、卡片外最多一句说明 |
 
-`KIMI_WEB_SKILLS=0` 关闭整段注入。客户端自带 widget/artifact 工具时只注入第一条，避免与真实渲染能力冲突。
+`KIMI_WEB_SKILLS=0` 关闭整段注入。客户端自带 widget/artifact 工具时只注入第一条，避免与真实渲染能力冲突。触发条件只认 Kimi 容器里的真实路径（以及 `kimi-widget` 这个技能名），客户端自己的"读 SKILL.md"约定不会被误伤——DSH 的真实请求里 `SKILL.md` 出现 0 次，只有模型自己脑补时才会出现。
+
+真机对照（`tools/probe-compact-live.mjs` 的 B 段，问句就是 `session-72ea02fe…` 里那句）：
+
+| 版本 | 行为 |
+| --- | --- |
+| 0.4.3 | 模型先 `read("/app/.agents/skills/kimi-widget/SKILL.md")` → `FsError FS_NOT_FOUND` → 第二跳只吐 619 字符思考、正文为空 |
+| 0.5.0 | 一次成型：正文 2,249 字符（内联样式 HTML 卡片 + 真实天气 16℃/1℃ + `[2][10]` 引用），无 `/app`、无 `SKILL.md` |
 
 ## 12. 参数刻度实测（2026-10-27，真机）
 

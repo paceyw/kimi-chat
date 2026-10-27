@@ -27,6 +27,10 @@ test("a card request with a client widget tool only gets the environment note", 
   assert.doesNotMatch(text, /kimi-widget/)
 })
 
+test("a bare SKILL.md mention from another client is left alone", () => {
+  assert.equal(webSkillPrompt({ messages: [{ role: "system", content: "Read SKILL.md before answering." }, user("写个快排")] }), "")
+})
+
 test("KIMI_WEB_SKILLS=0 disables the injection", () => {
   const old = process.env.KIMI_WEB_SKILLS
   try {

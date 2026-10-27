@@ -41,7 +41,7 @@
     "maxConcurrency": 2
   },
   "scripts": {
-    "check": "node --check src/index.mjs && node --check src/config.mjs && node --check src/openai.mjs && node --check src/stream.mjs && node --check src/kimi-api.mjs && node --check src/kimi-connect.mjs && node --check src/models.mjs && node --check src/tools.mjs && node --check src/skills.mjs && node --check src/login.mjs && node --check src/usage.mjs && node --check src/ui-protocol.mjs && node --check src/tokens.mjs",
+    "check": "node --check src/index.mjs && node --check src/config.mjs && node --check src/openai.mjs && node --check src/stream.mjs && node --check src/kimi-api.mjs && node --check src/kimi-connect.mjs && node --check src/kimi-proto.mjs && node --check src/models.mjs && node --check src/tools.mjs && node --check src/skills.mjs && node --check src/login.mjs && node --check src/usage.mjs && node --check src/ui-protocol.mjs && node --check src/tokens.mjs && node --check src/qr-terminal.mjs && node --check src/qrcode-generator.mjs",
     "test": "node --test",
     "test:check": "npm run check && npm test"
   }

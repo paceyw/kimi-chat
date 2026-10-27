@@ -162,16 +162,23 @@ magpie quota                              # 应出现「月额度」窗口与剩
 
 可调：`KIMI_TOOLS_MAX_CHARS=0` 关掉预算；`KIMI_TOOLS_MODE=full` 回到完整 schema（默认 `compact`）。
 
+真机验证（网关 `127.0.0.1:3425`，`kimi-chat/kimi-fast` + `reasoning_effort=low`）：
+
+- 305 个工具 + 一句「只回四个字」：`http 200`，带 `usage` 的 `prompt_tokens` 只有 **11,385**（整段提示词，旧渲染约 9 万）；模型照常回答。
+- 两步工具循环：第 1 步模型发出 `get_weather({"city":"北京","unit":"c"})`（`finish_reason=tool_calls`），把结果按 `role:"tool"` 回填后第 2 步给出「北京今天当前气温为 **16℃**…」——紧凑手册没有破坏参数格式与多步收尾。
+
 ### 网页端技能适配（`kimi-widget` 之类）
 
 Kimi 的网页/桌面容器里挂着 `/app/.agents/skills/<name>/SKILL.md`。模型在那边遇到「做个组件卡片」会先 `read` 一下 `kimi-widget` 的规范再动手；换到我们这个 OpenAI 兼容通道里，那个路径**不存在**（实测报 `FS_NOT_FOUND`），而失败之后模型经常顺着这条错思路继续想，最后只吐思考、不吐正文。
 
 所以插件在两种情况下往提示词前面加一段校正（`src/skills.mjs`）：
 
-- 提示词里出现 `/app/.agents/skills` 或 `SKILL.md`：明确告诉模型「这里不是 Kimi 容器，没有那个目录，别为了读规范去调工具」；
+- 提示词里出现 Kimi 容器路径（`/app/.agents/skills/` 或 `/app/skills/`）或 `kimi-widget`：明确告诉模型「这里不是 Kimi 容器，没有那个目录，别为了读规范去调工具」；调用方自己声明的工具（含它自己的技能工具）照常可用。触发条件只认这些真实路径——DSH 的真实请求里 `SKILL.md` 出现 0 次，只有模型自己脑补时才会出现，所以别家的「读 SKILL.md」约定不会被误伤；
 - 最后一条用户消息像是要「卡片 / 组件 / 看板 / widget」，且客户端**没有**提供 `show_widget` / `render_widget` / `artifact` 这类工具：附上 `kimi-widget` 的等价做法——直接输出一段内联样式的自包含 HTML，先把数据查好再一次性出卡片，卡片外最多一句说明。
 
 客户端自己就有 widget/artifact 渲染工具时只保留第一条，免得跟真正的渲染能力打架。`KIMI_WEB_SKILLS=0` 可关掉整段注入。
+
+真机验证（就是会话 `session-72ea02fe…` 里那句导致空白回答的原话「你好，今天是几号，北京天气如何，请用一个组件卡片展示」）：0.4.3 会先 `read("/app/.agents/skills/kimi-widget/SKILL.md")` → `FS_NOT_FOUND` → 第二轮只吐思考、正文为空；0.5.0 同一个问句直接给出 **2,249 字符的内联样式 HTML 卡片**（含真实天气 16℃/1℃ 与 `[2][10]` 引用），全程没有出现任何 `/app` 路径或 `SKILL.md`。
 
 ## 用量与费用
 
@@ -199,8 +206,8 @@ Kimi 的网页/桌面容器里挂着 `/app/.agents/skills/<name>/SKILL.md`。模
 ## 开发与验证
 
 ```bash
-npm run check     # 14 个源文件语法检查
-npm test          # 单元测试（14 个文件 / 131 条，全部离线：假 transport，不需要登录、不打真实网络）
+npm run check     # 16 个源文件语法检查
+npm test          # 单元测试（15 个文件 / 131 条，全部离线：假 transport，不需要登录、不打真实网络）
 ```
 
 测试覆盖：wire 级 protobuf 编解码、Chat 流解析、工具调用标记切分与手册压缩（含预算降级、300 工具语料）、网页端技能适配注入、登录输入解析（含中文提示文案）、模型目录映射、思考档夹取、token 估算、逐帧取证、空回答补偿重试、标题会话复用、用量换算、UI 事件信封、多轮会话映射。

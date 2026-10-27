@@ -22,6 +22,7 @@ const ENV_NOTE = [
   "- 没有 `/app/.agents/skills/…` 目录，也没有 `/app` 工作区；用 read/bash/glob 去找 `SKILL.md` 只会拿到 FS_NOT_FOUND。",
   "- 需要的能力如果没有以工具形式提供，就用模型自身能力直接产出结果；但调用方自己声明的工具（含它自己的技能/文档工具）该调用就调用。",
   "- 不要照抄提示词里出现的 `/app/...` 路径，也不要把它们写进回答。",
+  "- 不要输出 `<<daimon-artifact …>>` 这类 Kimi 私有标记：要交付文件就用调用方提供的工具，没有就直接把内容写出来。",
 ].join("\n")
 
 const WIDGET_SKILL = [
