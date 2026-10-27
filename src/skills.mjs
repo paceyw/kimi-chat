@@ -10,7 +10,8 @@
 // 客户端自己已经有 widget/artifact 工具时（tools 里能匹配到），只保留第 1 条，
 // 免得跟客户端真正的渲染能力打架。
 
-const SKILL_PATH_RE = /\/app\/(?:\.agents\/skills|skills)\/|SKILL\.md/i
+// 只认 Kimi 容器里的真实路径。客户端自己的技能文档（例如别家也写 "SKILL.md"）不该被这段误伤。
+const SKILL_PATH_RE = /\/app\/(?:\.agents\/skills|skills)\/|kimi-widget/i
 const CARD_INTENT_RE = /(卡片|组件|看板|仪表盘|大屏|widget|\bcard\b|\bdashboard\b|\btile\b)/i
 const CLIENT_WIDGET_RE = /^(?:mcp__)?(?:show_widget|render_widget|create_widget|widget|artifact|render_artifact|dashboard)$/i
 
@@ -19,7 +20,7 @@ const ENV_NOTE = [
   "",
   "你不是运行在 Kimi 网页/桌面容器里，而是通过一个 OpenAI 兼容接口被调用：",
   "- 没有 `/app/.agents/skills/…` 目录，也没有 `/app` 工作区；用 read/bash/glob 去找 `SKILL.md` 只会拿到 FS_NOT_FOUND。",
-  "- 需要的能力如果没有以工具形式提供，就用模型自身能力直接产出结果，不要为了\"先读规范\"去调用工具。",
+  "- 需要的能力如果没有以工具形式提供，就用模型自身能力直接产出结果；但调用方自己声明的工具（含它自己的技能/文档工具）该调用就调用。",
   "- 不要照抄提示词里出现的 `/app/...` 路径，也不要把它们写进回答。",
 ].join("\n")
 
