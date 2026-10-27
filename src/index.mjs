@@ -5,7 +5,8 @@
 
 import { LIMITS, PROVIDER, NAME, ORIGIN, MODELS } from "./config.mjs"
 import { buildCatalog, toProviderModels, DEFAULT_PRICING } from "./models.mjs"
-import { chunk, finishReason, messageText, toPrompt, validateMessages } from "./openai.mjs"
+import { chunk, finishReason, messageText, toPrompt, usageChunk, validateMessages } from "./openai.mjs"
+import { buildUsage } from "./tokens.mjs"
 import { classifyError, complete, parseCredentials, resolveModels, safeErrorMessage } from "./kimi-api.mjs"
 import {
   cancelChat, refreshToken,
@@ -285,6 +286,9 @@ export const server = async () => {
             // 客户端工具（OpenAI tools）不是上游的一等能力：渲染成提示词里的工具手册，
             // 再把模型输出的 <tool_call> 转回 OpenAI tool_calls（见 tools.mjs）。
             const toolBlock = toolPrompt(body.tools)
+            // magpie 会自己加 stream_options.include_usage=true，然后读收尾的 usage 帧记账；
+            // 不认这个开关的客户端不会收到多余帧。
+            const includeUsage = body.stream_options?.include_usage === true
             try { validateMessages(body.messages) } catch (error) { return invalid(error.message) }
 
             const id = `chatcmpl-${Math.random().toString(36).slice(2, 12)}`
@@ -308,6 +312,10 @@ export const server = async () => {
             if (!prompt.trim()) return invalid("Kimi requires non-empty text")
             if (toolBlock) prompt = `${toolBlock}\n\n${prompt}`
             if (prompt.length > LIMITS.maxPromptCharacters) return invalid("Kimi prompt is too large")
+            // 有些客户端（如 DSH）会额外发一次「给会话起标题」的请求，system 里带
+            // "Create a concise title…"。这种请求不需要思考、也不需要联网搜索：关掉既省额度，
+            // 也让上游少开一次 web_search 工具（标题质量不受影响）。
+            const utilityRequest = /create a concise title|generate the session title/i.test(prompt)
             let step0 = {}
 
             const run = async (emit) => {
@@ -319,10 +327,11 @@ export const server = async () => {
                 spec: catalog.specs[modelId],
                 prompt,
                 sessionId: useState?.kimiSessionId ?? null,
-                search: body.search_enabled !== false,
+                search: !utilityRequest && body.search_enabled !== false,
                 // 思考档位：OpenAI 语义名（low/medium/high/max）、数字（3/5/7）都接受，
-                // 由 tierToRequest 按该模型支持的档位集合夹取（Instant 只有 3/5）。
-                reasoningEffort: body.reasoning_effort ?? body.reasoningEffort,
+                // 由 tierToRequest 按该模型支持的档位集合夹取（Instant 只有 3/5）；
+                // 只要给了档位，tierToRequest 就会把上游的 thinking 打开（Instant 的思考和联网是一体的）。
+                reasoningEffort: utilityRequest ? undefined : (body.reasoning_effort ?? body.reasoningEffort),
                 // 网页端"速度/对话长度"两个刻度：客户端可显式覆盖（字符串枚举名或数字），
                 // 未知值由 tierToRequest 丢弃，绝不会把非法枚举发给上游。
                 speed: body.speed ?? body.kimi_speed,
@@ -380,7 +389,8 @@ export const server = async () => {
                   message.tool_calls.push(uiToolCall(uiEventRaw("create", { surfaceId: "citations", itemId: "citations", seq: events.length, component: "citation-list", props: { citations } }), { index: message.tool_calls.length }))
                   message.annotations = citations.map((c) => ({ type: "url_citation", url: c.url, title: c.title }))
                 }
-                return new Response(JSON.stringify({ id, object: "chat.completion", created, model: modelId, choices: [{ index: 0, message, finish_reason: clientCalls ? "tool_calls" : finishReason(status) }] }), { headers: { "content-type": "application/json" } })
+                const usage = buildUsage({ promptText: prompt, outputText: message.content ?? text, reasoningText: reasoning })
+                return new Response(JSON.stringify({ id, object: "chat.completion", created, model: modelId, choices: [{ index: 0, message, finish_reason: clientCalls ? "tool_calls" : finishReason(status) }], usage }), { headers: { "content-type": "application/json" } })
               } finally { cleanupAbort() }
             }
 
@@ -398,6 +408,7 @@ export const server = async () => {
             }
             void (async () => {
               let sentText = 0, sentReasoning = 0, role = false, status = "FINISHED", uiIndex = 0, sentCitations = 0, citationsSeen = false, uiSeq = 0, sentCalls = 0, toolCallsSeen = false
+              let finalText = "", finalReasoning = ""
               const seqNext = () => uiSeq++
               try {
                 await run(async (state) => {
@@ -407,6 +418,8 @@ export const server = async () => {
                   if (state.reasoning.length > sentReasoning) { const value = state.reasoning.slice(sentReasoning); sentReasoning = state.reasoning.length; await write(chunk(id, created, modelId, { reasoning_content: value })) }
                   // 客户端工具：从累计正文里剥离 <tool_call> 块，正文照常流式，调用转成 tool_calls 增量
                   const scanned = toolBlock ? scanToolCalls(state.text) : { text: state.text, calls: [] }
+                  finalText = scanned.text
+                  finalReasoning = state.reasoning
                   if (scanned.text.length > sentText) { const value = scanned.text.slice(sentText); sentText = scanned.text.length; await write(chunk(id, created, modelId, { content: value })) }
                   if (scanned.calls.length > sentCalls) {
                     for (; sentCalls < scanned.calls.length; sentCalls++) {
@@ -430,6 +443,7 @@ export const server = async () => {
                   }
                 })
                 await write(chunk(id, created, modelId, {}, toolCallsSeen ? "tool_calls" : finishReason(status)))
+                if (includeUsage) await write(usageChunk(id, created, modelId, buildUsage({ promptText: prompt, outputText: finalText, reasoningText: finalReasoning })))
                 await write("data: [DONE]\n\n")
                 await writer.close()
               } catch (error) {

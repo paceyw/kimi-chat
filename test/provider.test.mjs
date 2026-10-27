@@ -958,3 +958,31 @@ test("repeated search blocks for the same id patch instead of recreating", async
 
 
 
+
+test("usage is reported so the gateway can price the turn", async () => {
+  const response = await loaderFetch([{ role: "user", content: "你好" }], { transport: happyTransport })
+  const body = JSON.parse(await response.text())
+  assert.ok(body.usage, "non-streaming replies must carry usage")
+  assert.equal(body.usage.prompt_tokens, 2)
+  assert.ok(body.usage.completion_tokens > 0)
+  assert.equal(body.usage.total_tokens, body.usage.prompt_tokens + body.usage.completion_tokens)
+  assert.deepEqual(body.usage.prompt_tokens_details, { cached_tokens: 0 })
+})
+
+test("streaming appends one usage frame when include_usage is asked for", async () => {
+  const response = await loaderFetch([{ role: "user", content: "你好" }], {
+    stream: true, transport: happyTransport, extra: { stream_options: { include_usage: true } },
+  })
+  const text = await response.text()
+  const frames = text.split("\n\n").filter((f) => f.startsWith("data: ") && !f.includes("[DONE]")).map((f) => JSON.parse(f.slice(6)))
+  const last = frames.at(-1)
+  assert.deepEqual(last.choices, [], "the usage frame carries no choices")
+  assert.equal(last.usage.prompt_tokens, 2)
+  assert.ok(last.usage.completion_tokens > 0)
+})
+
+test("streaming without include_usage sends no usage frame", async () => {
+  const response = await loaderFetch([{ role: "user", content: "你好" }], { stream: true, transport: happyTransport })
+  const text = await response.text()
+  assert.ok(!text.includes("\"usage\""), "unasked clients must not receive the extra frame")
+})

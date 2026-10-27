@@ -216,12 +216,14 @@ export function tierToRequest(tier, prompt, { sessionId, search, searchForce, re
     req.scenario = spec.scenario || SCENARIO.CHAT
     if (spec.kimiplusId) req.kimiplusId = spec.kimiplusId
     req.options.model = spec.modelId
-    req.options.thinking = !!spec.thinking
     // 思考档位按该模型的允许集合夹取（清单没带就按场景默认：CHAT=Instant 两档，其余三档）
     const specEfforts = Array.isArray(spec.reasoningEfforts) && spec.reasoningEfforts.length
       ? spec.reasoningEfforts
       : (req.scenario === SCENARIO.CHAT ? INSTANT_EFFORTS : REASONING_EFFORTS)
     const specEffort = clampEffort(reasoningEffort, specEfforts, undefined)
+    // 选了思考档位就必须真的开思考：Instant 的思考和联网是一体的
+    // （见下方 fast 分支注释；2026-10-27 实测 thinking=false 时不会挂 web_search）。
+    req.options.thinking = !!spec.thinking || specEffort !== undefined
     if (specEffort !== undefined) req.options.reasoningEffort = specEffort
     req.options.speed = speedEnum ?? SPEED.FAST
     if (contextEnum) req.options.contextLength = contextEnum
@@ -264,6 +266,11 @@ export function tierToRequest(tier, prompt, { sessionId, search, searchForce, re
     // Instant 也透传思考档位，但只认 Low(3)/High(5)；7 夹到 5，非法值不发
     const fastEffort = clampEffort(reasoningEffort, INSTANT_EFFORTS, undefined)
     if (fastEffort !== undefined) req.options.reasoningEffort = fastEffort
+    // 网页端的"进阶思考"= Instant + thinking=true + reasoningEffort。实测（2026-10-27）：
+    //   thinking=false 时服务端根本不挂联网搜索工具（force=true 也不搜），模型会自称"没有联网工具"；
+    //   thinking=true 时立刻出现 web_search ToolBlock + 真实搜索结果（天气问题 19~54 个工具块）。
+    // 所以客户端一旦选了档位，就必须把 thinking 打开——否则"进阶思考"只是个空转的枚举。
+    if (fastEffort !== undefined) req.options.thinking = true
   }
   return req
 }

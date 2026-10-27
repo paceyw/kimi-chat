@@ -53,6 +53,13 @@ export function chunk(id, created, model, delta, finish_reason = null) {
   return `data: ${JSON.stringify({ id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta, finish_reason }] })}\n\n`
 }
 
+// 收尾的 usage 帧（OpenAI 语义：choices 为空、usage 带计数）。
+// magpie 会自己往上游请求里塞 stream_options.include_usage=true，然后读这一帧记账；
+// 少了它，网关就只能记 in=0/out=0（客户端显示"用量 0 tok"、也没有价格）。
+export function usageChunk(id, created, model, usage) {
+  return `data: ${JSON.stringify({ id, object: "chat.completion.chunk", created, model, choices: [], usage })}\n\n`
+}
+
 export function finishReason(status) {
   switch (status) {
     case "CONTENT_FILTER": return "content_filter"

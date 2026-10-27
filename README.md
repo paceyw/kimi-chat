@@ -5,8 +5,8 @@
 
 - 供应商 id：`kimi-chat`（客户端里写作 `kimi-chat/kimi-fast` 这样）
 - 上游：`https://www.kimi.com/apiv2`（connect-rpc over protobuf，私协议，见 [PROTOCOL.md](PROTOCOL.md)）
-- 能力：流式对话、思考档、联网搜索 + 引用、客户端工具调用（`tools`）、生成式 UI 事件、月额度与费用估算
-- 当前版本：**0.3.2**（变更见 [CHANGELOG.md](CHANGELOG.md)）；Node ≥ 20.3，无运行时依赖，纯 ESM
+- 能力：流式对话、思考档、联网搜索 + 引用、客户端工具调用（`tools`）、生成式 UI 事件、月额度与费用估算、token 用量（估算，见下）
+- 当前版本：**0.4.0**（变更见 [CHANGELOG.md](CHANGELOG.md)）；Node ≥ 20.3，无运行时依赖，纯 ESM
 
 ## 安装
 
@@ -111,7 +111,8 @@ magpie quota                              # 应出现「月额度」窗口与剩
 | `kimi-agent` | Agent（`scenario=OK_COMPUTER`）+ 插件能力 | 低 / 高 / 最高 | 联网、工具、时间线 |
 | `kimi-<slug>` | 上游返回的其它模型（如 K3.1 Pro / K2.8 Preview） | 低 / 高 / 最高 | 由 `display_name` 派生，不覆盖上面三档 |
 
-思考档通过 `reasoning_effort` 传（`low`/`high`/`max` → 上游 3/5/7，按模型夹取；Instant 只有低/高）。
+思考档通过 `reasoning_effort` 传（`low`/`high`/`medium`/`max` 或 `3`/`5`/`7`，按模型支持的档位夹取；Instant 只有低/高）。
+**给了档位就会把上游的思考打开**：Instant 的「思考」和服务端联网搜索是同一个开关——思考关着时，上游不会给这次请求挂 `web_search` 工具（即使请求里显式要求联网），模型也就只能回答“我没有实时数据”。所以想让快速档联网，就传一个思考档；不想思考就不要传。
 模型支持推理时，这些档位就是 magpie 里的推理档（`variants`），客户端也可以直接传 `kimi-chat/kimi-fast` 这样的 `provider/model`。
 
 一个已登录账号通常能看到 7 个入口（随上游返回变化，缓存 10 分钟）：
@@ -131,13 +132,25 @@ magpie quota                              # 应出现「月额度」窗口与剩
 - **对话长度**：**默认不支持选择**，固定用标准档（L）。超长上下文会让单次请求的消耗成倍上涨，而且几乎没有客户端能传这个额外参数；需要时可在服务端用 `KIMI_MAX_CONTEXT_LENGTH` 调高上限（取决于账号权限）。
 - **速度**：**默认不支持选择**，固定用上游的 FAST 档（请求枚举 5）。更快的档位与更高消耗绑定、且只有部分模型提供，客户端也很少能传这个参数，所以不做开关。
 - **客户端工具**：不是上游一等能力，但插件支持：把请求里的 `tools` 渲染成提示词里的工具手册，再把模型输出的 `<tool_call>` 还原成 OpenAI `tool_calls`（`finish_reason: "tool_calls"`），能力位因此报 `toolcall: true`。复杂工具流建议用 Agent 档。
-- **联网搜索**：默认开启，搜索结果以 `search-results` UI 事件 + `annotations` 引用返回；`search_enabled: false` 可关。
+- **联网搜索**：默认开启，搜索结果以 `search-results` UI 事件 + `annotations` 引用返回；`search_enabled: false` 可关。注意上面那条：快速档要先开思考，服务端才会真的挂 `web_search`。
+- **标题类请求**：客户端发来「给会话起标题」的请求（system 里带 `Create a concise title…`）时，插件自动关掉思考与联网搜索——这类请求不需要工具，开着只是白花额度。
 - **生成式 UI**：搜索/引用/时间线/产物以 `agent-timeline`、`citation-list`、`preview-card` 等白名单组件的事件流输出（Agent UI Protocol v1），未适配的客户端只看到文本 + 工具调用。
 
 ## 用量与费用
 
 `auth.usage` 只返回**月额度**一项（不含 5 小时 / 每周滚动窗口，那两个是限流器内部计数，展示出来只会误导）：已用百分比、套餐名（从订阅接口取，如 `<plan name>`）、到期时间，以及本机的会话映射条数。
 换算口径：月额度 100% = 你所用套餐的价格（环境变量 `KIMI_PLAN_CNY`，默认 199，不同套餐/地区请自行设置）→ 按 199 计 1% ≈ ¥1.99；每模型单价写在 `src/models.mjs` 的 `DEFAULT_PRICING`（¥ / 1M tokens，由额度百分比反推的估算价），作为 magpie 的 `cost` 回传。
+
+### token 用量（估算）
+
+上游的 Chat 流**不返回 token 计数**（`ChatResponse.usage` 只有一个联网搜索配额对象，不是 token），所以插件按文本估算：
+
+- 流式请求带 `stream_options:{include_usage:true}` 时，在 `data: [DONE]` 之前多发一帧 `choices: []` + `usage`（OpenAI 的标准收尾帧，magpie 就是靠它记账）；
+- 非流式响应直接带 `usage`；
+- 口径：CJK 逐字约 1 token，其它字符约 4 字符 1 token；`completion_tokens_details.reasoning_tokens` 单独给出思考部分的估算；
+- `prompt_tokens_details.cached_tokens` 恒为 `0` —— 上游没有缓存命中计数，不编造。
+
+因此 magpie `quota` / 客户端里看到的 token 与价格是**量级正确的估算**，不是上游账单；真正的花费请以 magpie 的月额度百分比为准。
 
 ## 不包含
 
@@ -149,11 +162,11 @@ magpie quota                              # 应出现「月额度」窗口与剩
 ## 开发与验证
 
 ```bash
-npm run check     # 11 个源文件语法检查
-npm test          # 单元测试（10 个文件 / 90 条，全部离线：假 transport，不需要登录、不打真实网络）
+npm run check     # 13 个源文件语法检查
+npm test          # 单元测试（11 个文件 / 101 条，全部离线：假 transport，不需要登录、不打真实网络）
 ```
 
-测试覆盖：wire 级 protobuf 编解码、Chat 流解析、工具调用标记切分、登录输入解析（含中文提示文案）、模型目录映射、用量换算、UI 事件信封、多轮会话映射。
+测试覆盖：wire 级 protobuf 编解码、Chat 流解析、工具调用标记切分、登录输入解析（含中文提示文案）、模型目录映射、思考档夹取、token 估算、用量换算、UI 事件信封、多轮会话映射。
 CI 在 Node 20 / 22 / 24 上跑同一套（`.github/workflows/test.yml`）。本地不需要 `npm install`（零依赖），也不需要登录 Kimi。
 
 协议事实表（端点 / proto / 认证头 / 参数刻度 / 错误码 / 待验证项）见 [PROTOCOL.md](PROTOCOL.md)。

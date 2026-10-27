@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0 — 2026-10-27
+
+**思考档真正生效（连带联网搜索）+ token 记账**
+
+- 修：`reasoning_effort` 之前只写进 `options.reasoningEffort`，没有打开上游 `thinking`，于是快速档
+  “静默不思考”。更关键的是：`thinking=false` 时上游不会给这次请求挂 `web_search`，
+  所以即使客户端要求联网，快速档也只会回答“我没有实时数据”。现在给了档位就写 `options.thinking = true`
+  （fast 与 spec 两条分支都改），实测同一问句从“无工具”变成 19~54 个工具块 + 真实天气 + 引用。
+- 修：响应里从来没有 `usage`，magpie 记账全是 `in=0/out=0`，客户端显示「用量 0 tok」且没有价格。
+  新增 `src/tokens.mjs` 估算 token：非流式响应带 `usage`；流式在 `stream_options.include_usage`
+  时补一帧 `choices: []` + `usage`（OpenAI 标准收尾帧）。`cached_tokens` 恒 0（上游无缓存计数，不编造）。
+- 新：识别「给会话起标题」这类请求（system 含 `Create a concise title…`），自动关掉思考与联网搜索，
+  不浪费额度。
+- 测试：`test/tier.test.mjs`（档位夹取 + thinking 联动，5 条）、`test/tokens.test.mjs`（3 条）、
+  provider 追加 3 条 usage 断言；共 101 条全绿。
+- 文档：README 记下「思考与联网是同一个开关」「usage 是估算」；PROTOCOL §12.1 补实测数据与
+  `kimi.chat.v1.Usage`（搜索配额，非 token）的字段证据。
+
 ## 0.3.2 — 2026-10-27
 
 **登录说明排版修正**

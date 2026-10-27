@@ -292,6 +292,18 @@ curl -s http://127.0.0.1:<端口>/v1/models | grep kimi   # 网关侧应能看�
   `tierToRequest` 按该集合夹取——集合内原样透传、超上界夹到上界（Instant 传 7 → 5）、
   非法/缺失不发（交上游默认）。magpie 的 `/v1/models` 里 `supported_reasoning_levels` 由 magpie
   自己的目录派生，插件模型条目没有对应字段，所以档位矩阵只在请求层强制。
+- **给了档位就必须把 `thinking` 打开（2026-10-27 真机实测，重要）**：`options.thinking=false` 时，
+  即使请求里显式带 `search{force:true}`，上游也**不会**给这次请求挂 `web_search` 工具，
+  模型只能回答"我没有实时数据"；`thinking=true` 时同样的问句会触发 19~54 个 `web_search` 工具块，
+  并返回真实天气。也就是说 Instant 的「思考」和「服务端联网搜索」是同一个开关。
+  实测记录（`tools/probe-search-force.mjs`）：E(thinking=false, force=true) → `toolBlocks=0`；
+  F(thinking=true, force=true) → `think=2224ch toolBlocks=19`；G(thinking=true, force=false) → `think=2198ch toolBlocks=54`。
+  因此 fast 分支与 spec 分支在收到档位时都会写 `req.options.thinking = true`。
+- **token 用量不是上游给的**：`ChatResponse.usage = 7` 对应的是 `kimi.chat.v1.Usage{research:1}`
+  （联网搜索配额：`id/name/type/status/limit/used`），**没有任何 token 计数**；全仓唯一带
+  `prompt_tokens/completion_tokens` 的 `kimi.chatty.v1.Usage` 属于另一个服务，不在本调用链上。
+  所以插件按文本估算 `usage`（`src/tokens.mjs`：CJK 逐字≈1、其余 4 字符≈1），
+  `cached_tokens` 恒 0，`reasoning_tokens` 单独估算；magpie 的 `usage.jsonl` 记的就是这份估算值。
 
 ## 13. 模型清单：按上游实际返回生成（2026-10-27 实测）
 
