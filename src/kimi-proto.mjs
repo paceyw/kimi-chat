@@ -1,4 +1,4 @@
-﻿// kimi-proto.mjs — 手写 protobuf wire 编解码（零依赖），仅覆盖 Kimi Chat 需要的消息子集。
+// kimi-proto.mjs — 手写 protobuf wire 编解码（零依赖），仅覆盖 Kimi Chat 需要的消息子集。
 // 字段号/枚举值来自 PROTOCOL.md（前端 descriptor 被动解码，2026-10-26）。
 // 编码约定：非可选字段只在有值时写出；proto3 默认值（0/""/false）省略。
 
