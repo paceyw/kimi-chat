@@ -6,19 +6,35 @@
 - 供应商 id：`kimi-chat`（客户端里写作 `kimi-chat/kimi-fast` 这样）
 - 上游：`https://www.kimi.com/apiv2`（connect-rpc over protobuf，私协议，见 [PROTOCOL.md](PROTOCOL.md)）
 - 能力：流式对话、思考档、联网搜索 + 引用、客户端工具调用（`tools`）、生成式 UI 事件、月额度与费用估算
+- 当前版本：**0.3.1**（变更见 [CHANGELOG.md](CHANGELOG.md)）；Node ≥ 20.3，无运行时依赖，纯 ESM
 
 ## 安装
 
 ```bash
-# 直接从 GitHub 装（浅克隆当前代码，无需等 npm 发布）
+# 方式一：直接从 GitHub 装当前代码（不用等 npm 发布）
 magpie plugin add github:paceyw/kimi-chat
 
-# 发布到 npm 之后也可以用包名
+# 方式二：桌面端「插件 → 发现」里点安装
+# 本仓库打了 magpie-plugin topic，会出现在「非官方插件 · GitHub」列表里
+
+# 方式三：npm 发布之后
 magpie plugin add kimi-chat
 ```
 
-装好后在供应商列表里会出现 **Kimi Chat (Web)**，点进去添加账号即可（下一步就是登录）。仓库打了 `magpie-plugin` topic，
-所以在 magpie 的「插件 → 发现 → 非官方插件 · GitHub」里也能直接找到。
+装好后供应商列表里出现 **Kimi Chat (Web)**（id `kimi-chat`），点「添加账号」就进入登录流程（见下一节）。
+
+装完可以三条命令自检，都通过再往下走：
+
+```bash
+magpie plugin list                        # 应列出 kimi-chat，7 models
+magpie provider test kimi-chat kimi-fast  # 应打印 ✓ chat <毫秒>
+magpie quota                              # 应出现「月额度」窗口与剩余百分比
+```
+
+> 插件是纯 ESM，没有构建步骤；从 GitHub 装时用的是仓库当前代码，所以本机不需要 `npm install`。
+>
+> 注意 spec 要带来源前缀：`github:paceyw/kimi-chat`（或 GitHub 仓库链接）。若把 `plugins.json` 里的 spec 写成裸包名
+> `kimi-chat` 而 npm 上还没有这个包，magpie 重启时会因解析不到而把这条 spec 丢掉，插件就从列表里消失了。
 
 ## 它登录什么
 
@@ -59,9 +75,9 @@ magpie plugin add kimi-chat
 
 | 位置 | 内容 |
 |---|---|
-| `~/.config/magpie/plugin-auth.json`（容器部署时是 `magpie` 的 `/config/magpie/plugin-auth.json`，权限 600） | `kimi-chat` 条目：`{type:"oauth", refresh:"<整份凭据 JSON>", access:"", expires:0, accountId:"<userId>"}` |
+| `plugin-auth.json`（macOS 默认 `~/Library/Application Support/magpie/`，Linux `~/.config/magpie/`，Docker 部署是 `/config/magpie/`；设置了 `XDG_CONFIG_HOME` 时以它为准；权限 600） | `kimi-chat` 条目：`{type:"oauth", refresh:"<整份凭据 JSON>", access:"", expires:0, accountId:"<userId>"}` |
 | 上面 `refresh` 字段里的 JSON | `accessToken`、`refreshToken`、`userId`、`webId`、`ssid`、`timezone` |
-| `~/.config/magpie/plugin-providers.json` | 只放供应商/模型/登录状态等元数据，**不含令牌** |
+| 同目录的 `plugin-providers.json` | 只放供应商/模型/登录状态等元数据，**不含令牌** |
 
 凭据是明文文件（与 magpie 其它插件一致），所以按普通密钥对待：别提交到仓库、别贴到公开 issue。
 想换账号：再登录一次即可（`accountId` 相同会替换旧账号）；想彻底撤销：在 kimi.com 网页里登出，再删掉 `plugin-auth.json` 里的 `kimi-chat` 条目。
@@ -91,6 +107,19 @@ magpie plugin add kimi-chat
 | `kimi-<slug>` | 上游返回的其它模型（如 K3.1 Pro / K2.8 Preview） | 低 / 高 / 最高 | 由 `display_name` 派生，不覆盖上面三档 |
 
 思考档通过 `reasoning_effort` 传（`low`/`high`/`max` → 上游 3/5/7，按模型夹取；Instant 只有低/高）。
+模型支持推理时，这些档位就是 magpie 里的推理档（`variants`），客户端也可以直接传 `kimi-chat/kimi-fast` 这样的 `provider/model`。
+
+一个已登录账号通常能看到 7 个入口（随上游返回变化，缓存 10 分钟）：
+
+| 入口 | 上游 | 思考档 |
+|---|---|---|
+| `kimi-fast` | Instant（`k2d6-chat` / `k28-instant`） | 低 / 高 |
+| `kimi-thinking` | Agent（`k3-agent`）+ `thinking=true` | 低 / 高 / 最高 |
+| `kimi-agent` | Agent（`scenario=OK_COMPUTER`）+ 插件能力 | 低 / 高 / 最高 |
+| `kimi-k3d1-agent` | K3.1 Pro（默认 Agent 模型） | 低 / 高 / 最高 |
+| `kimi-k2d8-preview` | K2.8 Preview（Work 场景 id） | 低 / 高 / 最高 |
+| `kimi-k28-instant` | Instant 的动态入口（`key=k28-instant`） | 低 / 高 |
+| `kimi-k3` | K3（`kimi_plus_id=ok-computer`） | 低 / 高 / 最高 |
 
 其它固定事实（实测，见 PROTOCOL.md §12）：
 
@@ -116,11 +145,11 @@ magpie plugin add kimi-chat
 
 ```bash
 npm run check     # 11 个源文件语法检查
-npm test          # 单元测试（10 个文件，全部离线：假 transport，不需要登录、不打真实网络）
+npm test          # 单元测试（10 个文件 / 90 条，全部离线：假 transport，不需要登录、不打真实网络）
 ```
 
-测试覆盖：wire 级 protobuf 编解码、Chat 流解析、工具调用标记切分、登录输入解析、模型目录映射、用量换算、UI 事件信封、多轮会话映射。
-CI 在 Node 20 / 22 / 24 上跑同一套（`.github/workflows/test.yml`）。
+测试覆盖：wire 级 protobuf 编解码、Chat 流解析、工具调用标记切分、登录输入解析（含中文提示文案）、模型目录映射、用量换算、UI 事件信封、多轮会话映射。
+CI 在 Node 20 / 22 / 24 上跑同一套（`.github/workflows/test.yml`）。本地不需要 `npm install`（零依赖），也不需要登录 Kimi。
 
 协议事实表（端点 / proto / 认证头 / 参数刻度 / 错误码 / 待验证项）见 [PROTOCOL.md](PROTOCOL.md)。
 
