@@ -120,11 +120,11 @@ export const server = async () => {
           // 但 LoginWithSMS 不校验 captcha，验证码正确就能换到 web token ——
           // 用户全程不需要复制 token，只需要输入收到的 6 位验证码。
           type: "oauth",
-          label: "Sign in on the Kimi website (phone code)",
+          label: "手机验证码登录（推荐）",
           prompts: [{
             type: "text",
             key: "phone",
-            message: "Kimi account phone number with country code — e.g. 86 13800138000",
+            message: "Kimi 账号的手机号，带国际区号（例如 86 13800138000）",
             placeholder: "86 13800138000",
             validate: (value) => {
               try { parsePhoneNumber(value); return undefined } catch (e) { return e.message }
@@ -138,8 +138,21 @@ export const server = async () => {
             let sent = { ok: false, captcha: true, message: "" }
             try { sent = await sendVerifyCode(phone) } catch (error) { sent = { ok: false, captcha: true, message: error?.message ?? "" } }
             const instructions = sent.ok
-              ? `A verification code was sent to ${shown}. Type the 6-digit code here — the plugin turns it into a signed-in session itself, so there is no token to copy.`
-              : `Kimi asks for a human check before it sends an SMS, so send it on the Kimi page that just opened at https://www.kimi.com/login (Sign in → phone number → send code), then type the 6-digit code you got for ${shown} here. The plugin turns that code into a signed-in session by itself — there is no token to copy.`
+              ? [
+                  `验证码已发送到 ${shown}。`,
+                  "",
+                  "第 1 步　稍等几秒，查看手机短信。",
+                  `第 2 步　在下方输入框填入收到的 6 位数字，然后确认。`,
+                  "第 3 步　插件会用这个验证码自己换取登录凭据，全程不需要复制任何 token。",
+                ].join("\n")
+              : [
+                  "Kimi 发送短信前要求先过人机验证，所以验证码要在网页里发。",
+                  "",
+                  "第 1 步　在弹出的 Kimi 网页（https://www.kimi.com/login）里选择手机号验证码登录。",
+                  `第 2 步　填入手机号 ${shown}，完成滑块或人机验证，点「发送验证码」。`,
+                  "第 3 步　回到这里，在下方输入框填入短信里的 6 位数字，然后确认。",
+                  "第 4 步　插件会用这个验证码自己换取登录凭据，全程不需要复制任何 token。",
+                ].join("\n")
             return {
               // 跳转官方网页登录：这一页既能完成人机验证发码，也让用户看清登录的是哪个账号。
               url: `${ORIGIN}/login`,
@@ -147,13 +160,13 @@ export const server = async () => {
               method: "code",
               async callback(code) {
                 const digits = String(code ?? "").replace(/\D/g, "")
-                if (!digits) return { type: "failed", error: "verification code is required" }
+                if (!digits) return { type: "failed", error: "请先输入短信里的验证码" }
                 let r
                 try {
                   r = await loginWithSMS(phone, digits)
                 } catch (error) {
                   const why = error?.kind === "unauthorized"
-                    ? "Kimi rejected the verification code (wrong or expired) — request a new one"
+                    ? "验证码不正确或已过期，请重新获取一次"
                     : (error?.message ?? String(error))
                   return { type: "failed", error: why }
                 }
@@ -177,18 +190,21 @@ export const server = async () => {
           // 只要 refresh_token 就够（实测 PROTOCOL.md §6.2：X-Traffic-Id / webId / ssid 都不是必需），
           // userId 从刷新后的 access token（JWT）的 sub 里取，账号归属不用用户手填。
           type: "oauth",
-          label: "Advanced: paste a refresh_token from the website",
+          label: "高级：粘贴网页 refresh_token（备用）",
           async authorize() {
             return {
               url: `${ORIGIN}/login`,
               instructions: [
-                "Fallback only — the phone-code sign-in above needs no copying.",
-                "1. Sign in on the Kimi page that just opened (phone, WeChat or password).",
-                "2. In the DevTools Console (F12) run",
-                "   copy(localStorage.getItem('refresh_token'))",
-                "   or, for both tokens at once:",
-                "   copy(JSON.stringify({accessToken: localStorage.getItem('access_token'), refreshToken: localStorage.getItem('refresh_token')}))",
-                "3. Paste it below (refresh_token alone, or that JSON).",
+                "备用方式。上面的「手机验证码登录」不需要复制任何东西，建议优先用它。",
+                "",
+                "第 1 步　在弹出的 Kimi 网页里登录你的账号（手机号、微信、密码都可以）。",
+                "第 2 步　登录成功后按 F12 打开开发者工具，切到 Console（控制台）标签。",
+                "第 3 步　在控制台粘贴下面这一行并回车，refresh_token 会直接进剪贴板：",
+                "　　　copy(localStorage.getItem('refresh_token'))",
+                "第 4 步　回到这里，在下方输入框粘贴（Ctrl+V），然后确认。",
+                "",
+                "如果想一次粘贴两个 token，第 3 步改用这一行：",
+                "　　　copy(JSON.stringify({accessToken: localStorage.getItem('access_token'), refreshToken: localStorage.getItem('refresh_token')}))",
               ].join("\n"),
               method: "code",
               async callback(input) {
@@ -200,7 +216,7 @@ export const server = async () => {
                 }
                 const device = { webId: deviceWebId(), ssid: randomId() }
                 if (!parsed.refreshToken) {
-                  return { type: "failed", error: "That only has an access_token; copy the refresh_token value instead" }
+                  return { type: "failed", error: "这里只拿到了 access_token，请改粘贴 refresh_token" }
                 }
                 // 活体验证：拿 refresh_token 当场换新 access token。
                 // 401 = 粘贴的值不对/已登出；网络故障不能假装登录成功。
@@ -209,9 +225,9 @@ export const server = async () => {
                   nt = await refreshToken({ refreshToken: parsed.refreshToken })
                 } catch (error) {
                   if (error?.kind === "unauthorized") {
-                    return { type: "failed", error: "Kimi rejected that refresh_token (expired or signed out) — sign in again and copy the current value" }
+                    return { type: "failed", error: "Kimi 拒绝了这个 refresh_token（已过期或已退出登录），请重新登录后复制最新的值" }
                   }
-                  return { type: "failed", error: "Could not reach Kimi: " + safeErrorMessage(error?.message ?? error) }
+                  return { type: "failed", error: "连接 Kimi 失败：" + safeErrorMessage(error?.message ?? error) }
                 }
                 const creds = buildCredentials(
                   {

@@ -29,15 +29,15 @@ magpie plugin add kimi-chat
 
 ### 方式 A：网页登录 + 短信验证码（推荐）
 
-1. magpie → 供应商 `kimi-chat` → 添加账号，选 **“Sign in on the Kimi website (phone code)”**，填手机号（带国家码，例如 `86 13800138000`）。
+1. magpie → 供应商 `kimi-chat` → 添加账号，选 **“手机验证码登录（推荐）”**，填手机号（带国家码，例如 `86 13800138000`）。
 2. magpie 会打开 <https://www.kimi.com/login>。如果 Kimi 允许插件直接发码，短信会立刻到你手机；如果它要求人机验证（常见），就在刚打开的页面里走一遍「登录 → 手机号 → 发送验证码」，把码发出来。
 3. 回到 magpie，填你收到的 6 位验证码。
 
-插件拿这 6 位码当场换取会话令牌（`access_token` + `refresh_token`），**不需要你复制任何 token**；账号归属（`accountId`）取自令牌，不用填 ID。
+插件拿这 6 位码当场换取会话令牌（`access_token` + `refresh_token`），**不需要你复制任何 token**；账号归属（`accountId`）取自令牌，不用填 ID。magpie 里显示的就是上面这份分步说明（第 1 步…第 4 步），一行一步。
 
 ### 方式 B：粘贴 `refresh_token`（备用）
 
-上面的验证码方式走不通时（换号、收不到短信、号码不在支持地区），可以选 **“Advanced: paste a refresh_token from the website”**：
+上面的验证码方式走不通时（换号、收不到短信、号码不在支持地区），可以选 **“高级：粘贴网页 refresh_token（备用）”**：
 
 1. magpie 打开 <https://www.kimi.com/login>，在页面里正常登录。
 2. DevTools（F12）→ **Application → Local Storage → `https://www.kimi.com`** → 复制 `refresh_token` 的值；

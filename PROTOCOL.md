@@ -121,14 +121,15 @@ Usage 限流类 → magpie rate_limited；CONTENT_FILTER → content_filter；CH
 
 ## 6. 登录引导（2026-10-27 改版：网页登录 + 验证码，扫码已下线）
 
-**主路径（网页登录 + 短信验证码，oauth `method:"code"`，`prompts:[phone]`）**：`magpie plugin login kimi-chat` 选 "Sign in on the Kimi website (phone code)" → 宿主打开 `https://www.kimi.com/login` → 插件先试 `SendVerifyCode`：
+**主路径（网页登录 + 短信验证码，oauth `method:"code"`，`prompts:[phone]`）**：`magpie plugin login kimi-chat` 选 "手机验证码登录（推荐）" → 宿主打开 `https://www.kimi.com/login` → 插件先试 `SendVerifyCode`：
 
 - 允许直接发码 → 短信即刻到达，用户只需回填 6 位码；
 - 要求人机验证（`REASON_ACCOUNT_CAPTCHA_VERIFY_FAILED`，实测常见）→ 用户在刚打开的网页里走「登录 → 手机号 → 发送验证码」，再把 6 位码回填 magpie。
 
 插件收到验证码后调 `LoginWithSMS`（**该校验不检查 captcha**，只要码正确就换得到 token）→ 拿到 `access_token` / `refresh_token` / `user_id`，直接落 oauth 形状。**全程不需要用户复制任何 token**，`accountId` 用返回的 `user_id`。
 
-**备选路径（粘贴 `refresh_token`，oauth `method:"code"` 无 prompts）**：标签 "Advanced: paste a refresh_token from the website"。宿主打开 `https://www.kimi.com/login`，用户登录后在 DevTools Console 执行 `copy(localStorage.getItem('refresh_token'))`，回 magpie 粘贴；插件立刻调 `RefreshToken` 活体验证（401 当场拒绝、网络故障不假装成功），`userId` 取新 access token JWT 的 `sub`。粘贴形状容忍：裸 JWT、带引号、`refresh_token=<值>`、`{"refreshToken":...}` JSON；把 `access_token` 粘进来会被明确拒绝（它 15 分钟就过期，存下来等于假登录）。
+**备选路径（粘贴 `refresh_token`，oauth `method:"code"` 无 prompts）**：标签 "高级：粘贴网页 refresh_token（备用）"。宿主打开 `https://www.kimi.com/login`，用户登录后在 DevTools Console 执行 `copy(localStorage.getItem('refresh_token'))`，回 magpie 粘贴；插件立刻调 `RefreshToken` 活体验证（401 当场拒绝、网络故障不假装成功），`userId` 取新 access token JWT 的 `sub`。粘贴形状容忍：裸 JWT、带引号、`refresh_token=<值>`、`{"refreshToken":...}` JSON；把 `access_token` 粘进来会被明确拒绝（它 15 分钟就过期，存下来等于假登录）。
+**界面文案**：两条方法的 `label` / `instructions` / 报错都是中文，`instructions` 一行一步（`第 1 步　…`），magpie 原样逐行显示。
 
 **已下线：QR 扫码**（原 `CreateLoginQRCode` + `GetLoginQRCodeStatus` 轮询）。原因：`/wechat/mp/auth` 是微信专用确认页（chunk `CdQwmZoy2.js` 只有一张「open in WeChat」图 + 文案，无任何 RPC），桌面浏览器走不通；按产品要求改由验证码方式承接。`kimi-connect.mjs` 里的两个 QR 原语与其 wire 测试保留（未被登录流程引用）。
 

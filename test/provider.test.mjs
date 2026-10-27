@@ -411,7 +411,7 @@ test("failed continuation clears mapping so next turn starts fresh", async () =>
 test("website sign-in: pasted refresh_token is exchanged, accountId taken from the token", async () => {
   const app = await server()
   // 按 label 取（methods 顺序会随新增登录方式变化）
-  const method = app.auth.methods.find(m => /paste/i.test(m.label))
+  const method = app.auth.methods.find(m => /粘贴/.test(m.label))
   const origFetch = globalThis.fetch
   // 用户回传的是 refresh JWT（真实形状：typ=refresh、sub=userId）
   const pasted = jwt({ typ: "refresh", sub: "u-42" })
@@ -451,7 +451,7 @@ test("website sign-in: pasted refresh_token is exchanged, accountId taken from t
 
 test("website sign-in: rejects the wrong token and unreachable Kimi honestly", async () => {
   const app = await server()
-  const method = app.auth.methods.find(m => /paste/i.test(m.label))
+  const method = app.auth.methods.find(m => /粘贴/.test(m.label))
   const grant = await method.authorize()
   const origFetch = globalThis.fetch
   try {
@@ -465,12 +465,12 @@ test("website sign-in: rejects the wrong token and unreachable Kimi honestly", a
     globalThis.fetch = async () => new Response(JSON.stringify({ code: "unauthenticated" }), { status: 401 })
     const expired = await grant.callback(jwt({ typ: "refresh", sub: "u-1" }))
     assert.equal(expired.type, "failed")
-    assert.match(expired.error, /sign in again/i)
+    assert.match(expired.error, /重新登录/)
     // 网络故障不能假装登录成功
     globalThis.fetch = async () => { throw new TypeError("fetch failed") }
     const netfail = await grant.callback(jwt({ typ: "refresh", sub: "u-1" }))
     assert.equal(netfail.type, "failed")
-    assert.match(netfail.error, /Could not reach Kimi/)
+    assert.match(netfail.error, /连接 Kimi 失败/)
   } finally { globalThis.fetch = origFetch }
 })
 
@@ -875,12 +875,12 @@ test("phone-code sign-in: opens the website, exchanges the SMS code, no token co
     throw new Error("unexpected fetch " + u)
   }
   try {
-    const method = app.auth.methods.find(m => /phone code/i.test(m.label))
+    const method = app.auth.methods.find(m => /手机验证码/.test(m.label))
     assert.ok(method, "phone-code method must exist")
     const grant = await method.authorize({ phone: "86 13800138000" })
     assert.equal(grant.method, "code")
     assert.equal(grant.url, "https://www.kimi.com/login")
-    assert.match(grant.instructions, /human check/i, "must explain the captcha step")
+    assert.match(grant.instructions, /人机验证/, "must explain the captcha step")
     assert.doesNotMatch(JSON.stringify(grant.instructions), /localStorage|copy\(/i, "instructions must not ask for token copying")
 
     const result = await grant.callback("123456")
@@ -908,8 +908,8 @@ test("phone-code sign-in: sends the SMS itself when Kimi allows it", async () =>
     throw new Error("unexpected fetch " + u)
   }
   try {
-    const grant = await app.auth.methods.find(m => /phone code/i.test(m.label)).authorize({ phone: "86 13800138000" })
-    assert.match(grant.instructions, /was sent/i, "no captcha path must say the code was sent")
+    const grant = await app.auth.methods.find(m => /手机验证码/.test(m.label)).authorize({ phone: "86 13800138000" })
+    assert.match(grant.instructions, /已发送/, "no captcha path must say the code was sent")
     assert.equal((await grant.callback("654321")).type, "success")
   } finally { globalThis.fetch = origFetch }
 })
@@ -924,10 +924,10 @@ test("phone-code sign-in: a rejected code fails honestly, never pretends to sign
     throw new Error("unexpected fetch " + u)
   }
   try {
-    const grant = await app.auth.methods.find(m => /phone code/i.test(m.label)).authorize({ phone: "86 13800138000" })
+    const grant = await app.auth.methods.find(m => /手机验证码/.test(m.label)).authorize({ phone: "86 13800138000" })
     const result = await grant.callback("000000")
     assert.equal(result.type, "failed")
-    assert.match(result.error, /rejected the verification code/i)
+    assert.match(result.error, /验证码不正确/)
     assert.equal(result.refresh, undefined)
   } finally { globalThis.fetch = origFetch }
 })

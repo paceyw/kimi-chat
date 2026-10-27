@@ -11,7 +11,7 @@ test("parsePhoneNumber accepts the shapes people actually type", () => {
   assert.deepEqual(parsePhoneNumber("+86 13800138000"), { countryCode: "86", number: "13800138000" })
   assert.deepEqual(parsePhoneNumber("8613800138000"), { countryCode: "86", number: "13800138000" })
   assert.deepEqual(parsePhoneNumber("852 61234567"), { countryCode: "852", number: "61234567" })
-  assert.throws(() => parsePhoneNumber("abc"), /digits/)
+  assert.throws(() => parsePhoneNumber("abc"), /只能是数字/)
 })
 
 test("loginWithSMS encodes PhoneNumber and the code, then parses both tokens", async () => {
@@ -70,7 +70,7 @@ test("sendVerifyCode reports the human-check wall instead of pretending success"
 test("the phone sign-in method walks phone → code and stores the session", async () => {
   const { server } = await import("../src/index.mjs")
   const app = await server()
-  const method = app.auth.methods.find(m => /phone/i.test(m.label))
+  const method = app.auth.methods.find(m => /手机验证码/.test(m.label))
   assert.ok(method, "phone method exists")
   const orig = globalThis.fetch
   try {

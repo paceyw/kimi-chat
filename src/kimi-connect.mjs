@@ -278,7 +278,7 @@ export function parsePhoneNumber(raw) {
   const hadPlus = original.startsWith("+");
   const s = original.replace(/[\s\-()]/g, "").replace(/^\+/, "");
   if (!/^\d{6,15}$/.test(s)) {
-    throw Object.assign(new Error("phone number must be digits (optionally with a country code, e.g. 86 13800138000)"), { kind: "bad_input" });
+    throw Object.assign(new Error("手机号只能是数字（可以带国际区号，例如 86 13800138000）"), { kind: "bad_input" });
   }
   if (!hadPlus && !/\s|-|\(/.test(original) && s.length === 11 && s.startsWith("1")) {
     return { countryCode: "86", number: s }; // 大陆手机号，省略国家码
@@ -289,7 +289,7 @@ export function parsePhoneNumber(raw) {
     const cc = s.slice(0, len);
     if (/^[1-9]\d*$/.test(cc) && s.length - len >= 6) return { countryCode: cc, number: s.slice(len) };
   }
-  throw Object.assign(new Error("cannot parse the phone number; use '<country code> <number>', e.g. 86 13800138000"), { kind: "bad_input" });
+  throw Object.assign(new Error("无法识别这个手机号；请按「国家码 号码」填写，例如 86 13800138000"), { kind: "bad_input" });
 }
 
 // ---------- GetAvailableModels（connect unary, Ge 白名单端点） ----------

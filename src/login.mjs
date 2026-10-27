@@ -81,14 +81,14 @@ function pick(obj, keys) {
  */
 export function parseLoginInput(input) {
   const raw = strip(input)
-  if (!raw) throw new Error("Paste the refresh_token value from the Kimi website")
+  if (!raw) throw new Error("请先粘贴 Kimi 网页里的 refresh_token")
   // 1) JSON（DevTools 导出 / 我们自己的凭据 JSON）
   if (raw.startsWith("{")) {
     let o
-    try { o = JSON.parse(raw) } catch { throw new Error("That looks like JSON but does not parse; copy just the refresh_token value") }
+    try { o = JSON.parse(raw) } catch { throw new Error("这段内容看起来像 JSON 但解析失败，请只复制 refresh_token 的值") }
     const refreshToken = pick(o, ["refreshToken", "refresh_token", "refresh"])
     const accessToken = pick(o, ["accessToken", "access_token", "access"])
-    if (!refreshToken && !accessToken) throw new Error("No refreshToken/accessToken field found in that JSON")
+    if (!refreshToken && !accessToken) throw new Error("这段 JSON 里没有 refreshToken / accessToken 字段")
     return { refreshToken, accessToken, userId: userIdFromToken(refreshToken) || userIdFromToken(accessToken), source: "json" }
   }
   // 2) 单个令牌
@@ -96,7 +96,7 @@ export function parseLoginInput(input) {
   if (JWT_RE.test(token)) {
     const kind = tokenKind(token)
     if (kind === "access") {
-      throw new Error("That is the access_token, which expires in minutes. Copy refresh_token instead (DevTools → Application → Local Storage → refresh_token)")
+      throw new Error("这是 access_token，几分钟就会过期；请改复制 refresh_token（F12 → Application → Local Storage → refresh_token）")
     }
     return { refreshToken: token, accessToken: "", userId: userIdFromToken(token), source: kind === "refresh" ? "refresh-jwt" : "json" }
   }
@@ -104,7 +104,7 @@ export function parseLoginInput(input) {
   if (/^[A-Za-z0-9._~+/=-]{16,}$/.test(token)) {
     return { refreshToken: token, accessToken: "", userId: "", source: "opaque" }
   }
-  throw new Error("That does not look like a Kimi token; copy the value of refresh_token from the Kimi website")
+  throw new Error("这不像 Kimi 的令牌；请复制 Kimi 网页里的 refresh_token 值")
 }
 
 /**

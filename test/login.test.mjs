@@ -55,9 +55,9 @@ test("parseLoginInput: access token gets a pointed error", () => {
 test("parseLoginInput: rejects empty and junk", () => {
   assert.throws(() => parseLoginInput(""), /refresh_token/)
   assert.throws(() => parseLoginInput("   "), /refresh_token/)
-  assert.throws(() => parseLoginInput("not a token"), /does not look like a Kimi token/)
-  assert.throws(() => parseLoginInput("{oops"), /does not parse/)
-  assert.throws(() => parseLoginInput("{}"), /No refreshToken\/accessToken/)
+  assert.throws(() => parseLoginInput("not a token"), /不像 Kimi 的令牌/)
+  assert.throws(() => parseLoginInput("{oops"), /解析失败/)
+  assert.throws(() => parseLoginInput("{}"), /没有 refreshToken/)
 })
 
 test("parseLoginInput: opaque refresh token is accepted (verified later by RefreshToken)", () => {
