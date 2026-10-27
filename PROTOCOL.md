@@ -332,6 +332,28 @@ Kimi 网页/桌面容器内挂 `/app/.agents/skills/<name>/SKILL.md`。经 OpenA
 | 0.4.3 | 模型先 `read("/app/.agents/skills/kimi-widget/SKILL.md")` → `FsError FS_NOT_FOUND` → 第二跳只吐 619 字符思考、正文为空 |
 | 0.5.0 | 一次成型：正文 2,249 字符（内联样式 HTML 卡片 + 真实天气 16℃/1℃ + `[2][10]` 引用），无 `/app`、无 `SKILL.md` |
 
+### 11.3 卡片渲染：`html-card` 组件（2026-10-27，0.6.0）
+
+0.5.0 起卡片就是正文里的自包含 HTML，插件不改写它。为了让宿主能把它渲染成真正的卡片，0.6.0 在正文之后补一帧 UI 事件：
+
+```
+tool_calls[] += { function: { name: "kimi_ui__render", arguments: JSON.stringify({
+  v: 1, surfaceId: "card", itemId: "card", seq: <n>, op: "create", component: "html-card",
+  props: { html: "<section style=…>…</section>", title: "北京天气", text: "卡片外那句说明", height?: 360 }
+}) } }
+```
+
+| 项 | 约定 |
+| --- | --- |
+| 触发 | 本轮 `finish_reason` 不是 `tool_calls`，且正文里能切出**最外层带 `style=` 的 `<section>`/`<div>`**（含 ```` ```html ```` 围栏内的写法） |
+| 切分 | `extractHtmlCard()` 配对同名标签（支持同名嵌套），`html` 原样下发、**不清洗不改写**；围栏外的文字进 `props.text` |
+| `title` | 元素里第一个 `<h1~h3>`/`<title>` 的纯文本，截 80 字；没有就省略该字段 |
+| 时机 | 正文全部推完之后、`finish_reason` 帧之前；`finish_reason` 保持 `stop` |
+| 非流式 | 同一事件追加进 `message.tool_calls`；`message.content` 仍是 HTML 原文 |
+| 不触发 | 工具轮（`tool_calls`）、纯 Markdown 表格、无 `style=` 的裸标签、未闭合元素（宁可退化也不猜） |
+| 安全 | `html` 是不可信内容：宿主必须放进沙箱 iframe（`sandbox` 不含 `allow-scripts`）并在 srcdoc 里加 `default-src 'none'` 的 CSP；未知组件退回文本摘要 |
+
+真机：`tools/probe-compact-live.mjs` 的 B 段（「…请用一个组件卡片展示」）在网关侧可看到 1 帧 `kimi_ui__render` + `component: "html-card"`，正文 2,456 字符、`finish_reason` 仍为 `stop`。
 ## 12. 参数刻度实测（2026-10-27，真机）
 
 网页端的"思考强度 / 对话长度 / 速度"三组选项并非都能透传，逐值实测定死的结论：

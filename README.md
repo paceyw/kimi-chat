@@ -5,8 +5,8 @@
 
 - 供应商 id：`kimi-chat`（客户端里写作 `kimi-chat/kimi-fast` 这样）
 - 上游：`https://www.kimi.com/apiv2`（connect-rpc over protobuf，私协议，见 [PROTOCOL.md](PROTOCOL.md)）
-- 能力：流式对话、思考档、联网搜索 + 引用、客户端工具调用（`tools`，工具手册压缩）、Kimi 网页端技能适配（如 `kimi-widget` 组件卡片）、生成式 UI 事件、月额度与费用估算、token 用量（估算，见下）
-- 当前版本：**0.5.0**（变更见 [CHANGELOG.md](CHANGELOG.md)）；Node ≥ 20.3，无运行时依赖，纯 ESM
+- 能力：流式对话、思考档、联网搜索 + 引用、客户端工具调用（`tools`，工具手册压缩）、Kimi 网页端技能适配（如 `kimi-widget` 组件卡片，附 `html-card` 渲染事件）、生成式 UI 事件、月额度与费用估算、token 用量（估算，见下）
+- 当前版本：**0.6.0**（变更见 [CHANGELOG.md](CHANGELOG.md)）；Node ≥ 20.3，无运行时依赖，纯 ESM
 
 ## 安装
 
@@ -180,6 +180,38 @@ Kimi 的网页/桌面容器里挂着 `/app/.agents/skills/<name>/SKILL.md`。模
 
 真机验证（就是会话 `session-72ea02fe…` 里那句导致空白回答的原话「你好，今天是几号，北京天气如何，请用一个组件卡片展示」）：0.4.3 会先 `read("/app/.agents/skills/kimi-widget/SKILL.md")` → `FS_NOT_FOUND` → 第二轮只吐思考、正文为空；0.5.0 同一个问句直接给出 **2,249 字符的内联样式 HTML 卡片**（含真实天气 16℃/1℃ 与 `[2][10]` 引用），全程没有出现任何 `/app` 路径或 `SKILL.md`。
 
+### 卡片在客户端怎么渲染
+
+模型产出的卡片是**正文里的自包含 HTML**（0.5.0 起）。对不做 HTML 渲染的客户端，那就只是一段源码；所以 0.6.0 额外下发一帧 Agent UI Protocol 事件，让宿主把它渲染成真正的卡片：
+
+```json
+{"v":1,"surfaceId":"card","itemId":"card","seq":2,"op":"create","component":"html-card",
+ "props":{"html":"<section style=\"padding:20px\">…</section>","title":"北京天气","text":"北京今天晴。"}}
+```
+
+- 信封：`tool_calls[]` 里的 `kimi_ui__render`（`component` 为 `html-card`），正文**保持原样**继续流式输出；
+- 时机：正文之后、`finish_reason` 之前；`finish_reason` 仍是 `stop`——卡片不是工具调用，宿主不该因此进入工具循环；
+- `props`：`html`（必填，原样、未清洗）、`title`（从 `<h1~h3>`/`<title>` 抽的纯文本）、`text`（卡片外那句说明）、`height`（可选）；
+- 工具轮（`finish_reason: "tool_calls"`）不产卡片帧。
+
+宿主渲染要点（**安全**）：HTML 是模型输出，必须当不可信内容处理——
+
+```js
+// 最小参考实现：沙箱 iframe + srcdoc，脚本与网络一律不许出
+const iframe = document.createElement("iframe")
+iframe.setAttribute("sandbox", "allow-same-origin") // 不要加 allow-scripts / allow-top-navigation
+iframe.setAttribute("referrerpolicy", "no-referrer")
+iframe.style.cssText = "width:100%;border:0;border-radius:16px"
+const csp = "default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+iframe.srcdoc = '<!doctype html><meta http-equiv="Content-Security-Policy" content="' + csp + '"><body style="margin:0">' + props.html + "</body>"
+document.body.append(iframe)
+iframe.addEventListener("load", () => {              // 自适应高度
+  iframe.style.height = iframe.contentDocument.documentElement.scrollHeight + "px"
+})
+```
+
+也可以把它降级成纯文本（直接显示 `props.html`）或丢弃；未知组件按协议应当退回文本摘要，不要整条消息失败。
+
 ## 用量与费用
 
 `auth.usage` 只返回**月额度**一项（不含 5 小时 / 每周滚动窗口，那两个是限流器内部计数，展示出来只会误导）：已用百分比、套餐名（从订阅接口取，如 `<plan name>`）、到期时间，以及本机的会话映射条数。
@@ -207,7 +239,7 @@ Kimi 的网页/桌面容器里挂着 `/app/.agents/skills/<name>/SKILL.md`。模
 
 ```bash
 npm run check     # 16 个源文件语法检查
-npm test          # 单元测试（15 个文件 / 131 条，全部离线：假 transport，不需要登录、不打真实网络）
+npm test          # 单元测试（15 个文件 / 136 条，全部离线：假 transport，不需要登录、不打真实网络）
 ```
 
 测试覆盖：wire 级 protobuf 编解码、Chat 流解析、工具调用标记切分与手册压缩（含预算降级、300 工具语料）、网页端技能适配注入、登录输入解析（含中文提示文案）、模型目录映射、思考档夹取、token 估算、逐帧取证、空回答补偿重试、标题会话复用、用量换算、UI 事件信封、多轮会话映射。

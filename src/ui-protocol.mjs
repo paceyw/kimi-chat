@@ -114,6 +114,20 @@ export const UI_COMPONENTS = {
       },
     },
   },
+  // Kimi 网页/桌面「组件卡片」的等价物：模型直接产出的自包含 HTML 片段。
+  // 宿主应把它渲染在**沙箱 iframe**里（srcdoc + 禁网/禁脚本），不要直接注入主文档。
+  "html-card": {
+    props: {
+      type: "object",
+      required: ["html"],
+      properties: {
+        html: { type: "string" },
+        title: { type: "string" },
+        text: { type: "string" },
+        height: { type: "integer", minimum: 120 },
+      },
+    },
+  },
 }
 
 export const UI_OPS = ["create", "patch", "complete", "remove", "error"]

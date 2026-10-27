@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { webSkillPrompt } from "../src/skills.mjs"
+import { cardTitle, extractHtmlCard, webSkillPrompt } from "../src/skills.mjs"
 
 const user = (content) => ({ role: "user", content })
 const withWidgetTool = [{ type: "function", function: { name: "show_widget", description: "", parameters: {} } }]
@@ -40,4 +40,30 @@ test("KIMI_WEB_SKILLS=0 disables the injection", () => {
     if (old === undefined) delete process.env.KIMI_WEB_SKILLS
     else process.env.KIMI_WEB_SKILLS = old
   }
+})
+
+test("extractHtmlCard cuts the outermost inline-styled element out of the prose", () => {
+  const text = "北京今天晴。\n\n<section style=\"padding:20px\"><div><h2>北京天气</h2></div><p>16℃</p></section>\n\n以上。"
+  const card = extractHtmlCard(text)
+  assert.ok(card)
+  assert.match(card.html, /^<section/)
+  assert.match(card.html, /<\/section>$/)
+  assert.match(card.html, /<\/div><p>16℃<\/p><\/section>$/, "nested same-tag elements must not cut early")
+  assert.equal(card.text, "北京今天晴。\n\n以上。")
+  assert.equal(cardTitle(card.html), "北京天气")
+})
+
+test("extractHtmlCard unwraps a fenced html block", () => {
+  const card = extractHtmlCard("看这个：\n\n\u0060\u0060\u0060html\n<div style=\"color:red\"><p>hi</p></div>\n\u0060\u0060\u0060\n")
+  assert.ok(card)
+  assert.equal(card.html, '<div style="color:red"><p>hi</p></div>')
+  assert.equal(card.text, "看这个：")
+})
+
+test("extractHtmlCard ignores prose, tables and unstyled markup", () => {
+  assert.equal(extractHtmlCard("| a | b |\n|---|---|\n| 1 | 2 |"), null)
+  assert.equal(extractHtmlCard("<div>plain</div>"), null)
+  assert.equal(extractHtmlCard("<section style=\"padding:20px\"><p>unclosed</p>"), null)
+  assert.equal(extractHtmlCard(""), null)
+  assert.equal(cardTitle("<p>no heading</p>"), "")
 })

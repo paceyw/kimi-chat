@@ -15,7 +15,7 @@ import {
 import { uiToolCall, uiEvent as uiEventRaw } from "./ui-protocol.mjs"
 import { toUsageReport, DEFAULT_PLAN_CNY } from "./usage.mjs"
 import { scanToolCalls, toolCallDelta, toolPrompt } from "./tools.mjs"
-import { webSkillPrompt } from "./skills.mjs"
+import { cardTitle, extractHtmlCard, webSkillPrompt } from "./skills.mjs"
 import { buildCredentials, parseLoginInput } from "./login.mjs"
 
 const sessions = new Map() // sessionId -> { kimiSessionId, updatedAt, fingerprint }
@@ -438,6 +438,20 @@ export const server = async () => {
                   message.tool_calls.push(uiToolCall(uiEventRaw("create", { surfaceId: "citations", itemId: "citations", seq: uiEvents.length, component: "citation-list", props: { citations } }), { index: message.tool_calls.length }))
                   message.annotations = citations.map((c) => ({ type: "url_citation", url: c.url, title: c.title }))
                 }
+                if (!clientCalls) {
+                  const card = extractHtmlCard(message.content ?? text)
+                  if (card) {
+                    const title = cardTitle(card.html)
+                    message.tool_calls ??= []
+                    message.tool_calls.push(uiToolCall(uiEventRaw("create", {
+                      surfaceId: "card",
+                      itemId: "card",
+                      seq: (uiEvents.length ?? 0) + (citations.length ? 1 : 0),
+                      component: "html-card",
+                      props: { html: card.html, ...(title ? { title } : {}), ...(card.text ? { text: card.text } : {}) },
+                    }), { index: message.tool_calls.length }))
+                  }
+                }
                 const usage = buildUsage({ promptText: prompt, outputText: message.content ?? text, reasoningText: reasoning })
                 return new Response(JSON.stringify({ id, object: "chat.completion", created, model: modelId, choices: [{ index: 0, message, finish_reason: clientCalls ? "tool_calls" : finishReason(status) }], usage }), { headers: { "content-type": "application/json" } })
               } finally { cleanupAbort() }
@@ -499,6 +513,19 @@ export const server = async () => {
                 // 第二次的思考不再重复推给客户端（已经推过一次了），只等正文/工具调用。
                 if (!finalText.trim() && !toolCallsSeen && finalReasoning.trim() && !requestAbort.signal.aborted) {
                   await pump(`${prompt}\n\n${EMPTY_ANSWER_NUDGE}`, { emitReasoning: false })
+                }
+                // 卡片：模型把自包含 HTML 写在正文里（正文已经流式发出）。这里再补一帧
+                // Agent UI Protocol 的 html-card，宿主可以据此渲染成真正的卡片。
+                const card = toolCallsSeen ? null : extractHtmlCard(finalText)
+                if (card) {
+                  const title = cardTitle(card.html)
+                  await write(chunk(id, created, modelId, { tool_calls: [uiToolCall(uiEventRaw("create", {
+                    surfaceId: "card",
+                    itemId: "card",
+                    seq: seqNext(),
+                    component: "html-card",
+                    props: { html: card.html, ...(title ? { title } : {}), ...(card.text ? { text: card.text } : {}) },
+                  }), { index: uiIndex++ })] }))
                 }
                 await write(chunk(id, created, modelId, {}, toolCallsSeen ? "tool_calls" : finishReason(status)))
                 if (includeUsage) await write(usageChunk(id, created, modelId, buildUsage({ promptText: prompt, outputText: finalText, reasoningText: finalReasoning })))

@@ -1093,3 +1093,50 @@ test("a widget request gets the Kimi built-in skill adaptation", async () => {
     complete._transport = saved
   }
 })
+
+const CARD_HTML = '<section style="max-width:640px;padding:20px"><h2>北京天气</h2><p>16℃ 晴</p></section>'
+
+test("streaming a card also emits an html-card UI event", async () => {
+  const { complete } = await import("../src/kimi-api.mjs")
+  const saved = complete._transport
+  complete._transport = async function* () {
+    yield { op: 2, block: { id: "b1", text: { content: `北京今天晴。\n\n${CARD_HTML}` } } }
+    yield { done: {} }
+  }
+  try {
+    const response = await loaderFetch([{ role: "user", content: "做个卡片" }], { stream: true })
+    const text = await new Response(response.body).text()
+    const events = text.split("\n\n").filter((l) => l.startsWith("data: ") && l !== "data: [DONE]").map((l) => JSON.parse(l.slice(6)))
+    const calls = events.flatMap((e) => e.choices?.[0]?.delta?.tool_calls ?? [])
+    const card = calls.find((c) => c.function?.name === "kimi_ui__render" && JSON.parse(c.function.arguments).component === "html-card")
+    assert.ok(card, "the card must arrive as a kimi_ui__render envelope")
+    const payload = JSON.parse(card.function.arguments)
+    assert.equal(payload.op, "create")
+    assert.equal(payload.surfaceId, "card")
+    assert.match(payload.props.html, /^<section/)
+    assert.equal(payload.props.title, "北京天气")
+    assert.equal(payload.props.text, "北京今天晴。")
+    const content = events.map((e) => e.choices?.[0]?.delta?.content ?? "").join("")
+    assert.ok(content.includes("北京今天晴。"), "text still streams as usual")
+    assert.equal(events[events.length - 1].choices[0].finish_reason, "stop", "a card must not turn the turn into tool_calls")
+  } finally { complete._transport = saved }
+})
+
+test("non-streaming card keeps the HTML in content and attaches html-card", async () => {
+  const { complete } = await import("../src/kimi-api.mjs")
+  const saved = complete._transport
+  complete._transport = async function* () {
+    yield { op: 2, block: { id: "b1", text: { content: CARD_HTML } } }
+    yield { done: {} }
+  }
+  try {
+    const response = await loaderFetch([{ role: "user", content: "做个卡片" }])
+    const body = JSON.parse(await response.text())
+    const message = body.choices[0].message
+    assert.equal(message.content, CARD_HTML)
+    assert.equal(body.choices[0].finish_reason, "stop")
+    const card = message.tool_calls.find((c) => JSON.parse(c.function.arguments).component === "html-card")
+    assert.ok(card)
+    assert.equal(JSON.parse(card.function.arguments).props.title, "北京天气")
+  } finally { complete._transport = saved }
+})

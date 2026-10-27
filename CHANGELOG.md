@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0 — 2026-10-27
+
+**卡片以 `html-card` 组件交给客户端渲染（保留 HTML 产出）**
+
+- 0.5.0 让模型把「组件卡片」直接写成正文里的自包含 HTML；对不做 HTML 渲染的客户端，那就只是一段源码。
+  这一版在不改变正文的前提下，**再补一帧 Agent UI Protocol 事件**：`kimi_ui__render` ×
+  `component: "html-card"`、`props: { html, title?, text?, height? }`，宿主据此渲染真正的卡片。
+- 新增 `src/ui-protocol.mjs` 白名单组件 `html-card`（`html` 必填，`title`/`text`/`height` 可选）。
+- 新增 `src/skills.mjs` 的 `extractHtmlCard(text)` / `cardTitle(html)`：按最外层带 `style=` 的
+  `<section>`/`<div>` 做配对切分（支持同名嵌套、```` ```html ```` 围栏），切出来的 HTML 原样下发，
+  **不清洗、不改写**——安全由宿主在沙箱里保证。正文本身不改：HTML 仍然照常流式发出。
+- 流式：卡片帧在正文之后、`finish_reason` 之前发出；`finish_reason` 仍是 `stop`（卡片不是工具调用，
+  不会让宿主进入工具循环）。非流式：`message.tool_calls` 里追加同一事件，`content` 保持 HTML。
+- 工具调用轮（`finish_reason: "tool_calls"`）不产卡片帧，避免和真正的工具结果混淆。
+- 测试：`test/skills.test.mjs` 加 3 条（切分/围栏/忽略无关标记），`test/provider.test.mjs` 加 2 条
+  （流式补帧且 `finish_reason` 不变、非流式 content 不变并挂上事件）。全量 **136 条通过**。
+
 ## 0.5.0 — 2026-10-27
 
 **工具手册压缩（7 倍）+ Kimi 网页端技能适配**

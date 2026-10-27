@@ -57,3 +57,68 @@ export function webSkillPrompt({ messages = [], tools = [], enabled } = {}) {
   if (wantsCard && !clientWidget) parts.push(WIDGET_SKILL)
   return parts.join("\n\n")
 }
+
+// ---------------------------------------------------------------------------
+// 卡片产出的结构识别：模型把卡片**写在正文里**（自包含 HTML）。宿主如果不渲染 HTML，
+// 看到的就是一段源码；要渲染就得先把它从正文里切出来。这里只做"外面那一个元素"的
+// 配对切分，不做 HTML 解析——不做清洗，安全由宿主在沙箱里保证。
+// ---------------------------------------------------------------------------
+
+const CARD_TAG_RE = /<(section|div)\b[^>]*style\s*=/i
+const FENCE_RE = /```(?:html)?\s*\n([\s\S]*?)\n\s*```/i
+
+/** 从正文里切出最外层的卡片元素；没有就返回 null。 */
+export function extractHtmlCard(text) {
+  const source = String(text ?? "")
+  if (!source.trim()) return null
+  // 模型偶尔会包一层 ```html 围栏：优先取围栏内那段，围栏外算说明文字。
+  const fenced = FENCE_RE.exec(source)
+  if (fenced && CARD_TAG_RE.test(fenced[1])) {
+    const html = fenced[1].trim()
+    const outside = joinOutside(source.slice(0, fenced.index), source.slice(fenced.index + fenced[0].length))
+    return { html, text: outside }
+  }
+  const start = CARD_TAG_RE.exec(source)
+  if (!start) return null
+  const tag = start[1].toLowerCase()
+  const open = new RegExp(`<${tag}\\b`, "gi")
+  const close = new RegExp(`</${tag}\\s*>`, "gi")
+  open.lastIndex = start.index
+  close.lastIndex = start.index
+  let depth = 0
+  let cursor = start.index
+  for (;;) {
+    open.lastIndex = cursor
+    close.lastIndex = cursor
+    const nextOpen = open.exec(source)
+    const nextClose = close.exec(source)
+    if (!nextClose) return null
+    if (nextOpen && nextOpen.index < nextClose.index) {
+      depth += 1
+      cursor = nextOpen.index + nextOpen[0].length
+      continue
+    }
+    depth -= 1
+    cursor = nextClose.index + nextClose[0].length
+    if (depth === 0) {
+      const html = source.slice(start.index, cursor).trim()
+      const outside = joinOutside(source.slice(0, start.index), source.slice(cursor))
+      if (html.length < 40) return null
+      return { html, text: outside }
+    }
+    if (depth < 0) return null
+  }
+}
+
+// 卡片被切走后，前后两段拼起来并压掉因切分产生的多余空行。
+function joinOutside(head, tail) {
+  return `${head}\n${tail}`.replace(/\n{3,}/g, "\n\n").trim()
+}
+
+/** 卡片标题：抓元素里第一个 <h1|h2|h3|title> 的纯文本，没有就用空串。 */
+export function cardTitle(html) {
+  const m = /<(h[1-3]|title)\b[^>]*>([\s\S]{1,200}?)<\/\1\s*>/i.exec(String(html ?? ""))
+  if (!m) return ""
+  const plain = m[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim()
+  return plain.slice(0, 80)
+}
