@@ -4,6 +4,9 @@
 //   yield { text, reasoning, status, sessionId, messageId, events: [uiEvent...], citations }
 // text/reasoning are cumulative snapshots; events are ui-protocol envelopes.
 
+import { appendFileSync, mkdirSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, isAbsolute, join } from "node:path"
 import { chatStream, getAvailableModels, refreshToken } from "./kimi-connect.mjs"
 import { matchModelId, REASONING_EFFORTS, INSTANT_EFFORTS } from "./models.mjs"
 import {
@@ -275,6 +278,56 @@ export function tierToRequest(tier, prompt, { sessionId, search, searchForce, re
   return req
 }
 
+// ---------- 逐帧追踪（KIMI_TRACE，仅取证，不参与逻辑） ----------
+// KIMI_TRACE=1                      → <tmpdir>/kimi-chat-traces/<时间戳>.jsonl
+// KIMI_TRACE=<path>/trace.jsonl     → 指定文件（相对路径按进程 cwd 解析）
+// 写入 request 摘要 + 每一帧 ChatResponse 原文；任何 IO 失败都吞掉，令牌从不落盘。
+function openTrace(req, prompt) {
+  const setting = process.env.KIMI_TRACE
+  if (!setting) return null
+  let file = setting
+  try {
+    if (setting === "1" || setting === "true") {
+      file = join(tmpdir(), "kimi-chat-traces", `${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`)
+    } else if (!isAbsolute(file)) {
+      file = join(process.cwd(), file)
+    }
+    mkdirSync(dirname(file), { recursive: true })
+    appendFileSync(file, JSON.stringify({
+      kind: "request",
+      at: new Date().toISOString(),
+      model: req.options?.model ?? "",
+      scenario: req.scenario,
+      thinking: req.options?.thinking ?? false,
+      reasoningEffort: req.options?.reasoningEffort ?? null,
+      contextLength: req.options?.contextLength ?? null,
+      speed: req.options?.speed ?? null,
+      promptChars: prompt.length,
+      traceFile: file,
+    }) + "\n")
+  } catch {
+    return null
+  }
+  return {
+    file,
+    frame(resp) {
+      try { appendFileSync(file, JSON.stringify(resp) + "\n") } catch { /* 取证不该影响对话 */ }
+    },
+    end(state) {
+      try {
+        appendFileSync(file, JSON.stringify({
+          kind: "end",
+          status: state.status,
+          textChars: textLength(state),
+          reasoningChars: state.reasoning.length,
+          citations: state.citations.length,
+          messageId: state.messageId,
+        }) + "\n")
+      } catch { /* 同上 */ }
+    },
+  }
+}
+
 // ---------- main: complete() ----------
 export async function* complete({ origin, credentials, tier, prompt, sessionId, signal, search = true, reasoningEffort, speed, contextLength, spec, onTokenRefresh }) {
   const auth = typeof credentials === "string" ? parseCredentials(credentials) : credentials
@@ -298,7 +351,9 @@ export async function* complete({ origin, credentials, tier, prompt, sessionId, 
     stream = chatStream(auth, req, { signal, onTokenRefresh })
   }
 
+  const trace = openTrace(req, prompt)
   for await (const resp of stream) {
+    trace?.frame(resp)
     applyResponse(state, resp)
     if (state.status === "ERROR") {
       throw Object.assign(new Error(state.errorMessage || "Kimi upstream error"), {
@@ -315,6 +370,7 @@ export async function* complete({ origin, credentials, tier, prompt, sessionId, 
     yield snapshot(state)
   }
   state.status ??= "FINISHED"
+  trace?.end(state)
   yield snapshot(state, true)
 }
 

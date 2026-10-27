@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.1 — 2026-10-27
+
+**逐帧取证开关（KIMI_TRACE）+ 快速模型思考档的实测记录**
+
+- 新增 `KIMI_TRACE`：`=1` 写到 `<tmpdir>/kimi-chat-traces/<时间戳>.jsonl`，`=<path>` 写到指定文件。
+  内容是 request 摘要（model / scenario / thinking / reasoningEffort / speed / prompt 长度）、
+  每一帧 `ChatResponse` 原文、末尾 `end` 摘要（状态 / 正文字数 / 思考字数 / 引用数）。
+  令牌与 Authorization 从不落盘，IO 失败静默忽略，不影响对话。
+- `PROTOCOL.md` 新增 §4.5：快速模型（`k28-instant`）+ 进阶思考（`reasoningEffort=5`、`thinking=true`）
+  的真机逐帧样例，含 `tool.status` 1/2/3 语义、args 流式追加、低档（3）不触发 web_search 的对照数据。
+- 测试：新增 `test/trace.test.mjs`（2 条），全量 103 条。
+
 ## 0.4.0 — 2026-10-27
 
 **思考档真正生效（连带联网搜索）+ token 记账**

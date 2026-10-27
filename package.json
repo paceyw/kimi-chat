@@ -1,6 +1,6 @@
 {
   "name": "kimi-chat",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Kimi Chat (kimi.com web account) in magpie — streaming chat, reasoning tiers, web search with citations, client tool calls and monthly quota on your own subscription",
   "type": "module",
   "main": "./src/index.mjs",

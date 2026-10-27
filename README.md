@@ -163,11 +163,33 @@ magpie quota                              # 应出现「月额度」窗口与剩
 
 ```bash
 npm run check     # 13 个源文件语法检查
-npm test          # 单元测试（11 个文件 / 101 条，全部离线：假 transport，不需要登录、不打真实网络）
+npm test          # 单元测试（12 个文件 / 103 条，全部离线：假 transport，不需要登录、不打真实网络）
 ```
 
-测试覆盖：wire 级 protobuf 编解码、Chat 流解析、工具调用标记切分、登录输入解析（含中文提示文案）、模型目录映射、思考档夹取、token 估算、用量换算、UI 事件信封、多轮会话映射。
+测试覆盖：wire 级 protobuf 编解码、Chat 流解析、工具调用标记切分、登录输入解析（含中文提示文案）、模型目录映射、思考档夹取、token 估算、逐帧取证、用量换算、UI 事件信封、多轮会话映射。
 CI 在 Node 20 / 22 / 24 上跑同一套（`.github/workflows/test.yml`）。本地不需要 `npm install`（零依赖），也不需要登录 Kimi。
+
+### 抓一份逐帧日志（可选）
+
+想在出问题时看到上游到底回了什么，可以打开取证开关（默认关闭，只写文件，不影响对话）：
+
+```bash
+KIMI_TRACE=1 magpie provider test kimi-chat kimi-fast        # → <tmpdir>/kimi-chat-traces/<时间戳>.jsonl
+KIMI_TRACE=/tmp/kimi-trace.jsonl magpie provider test kimi-chat kimi-fast
+```
+
+文件里是 `request` 摘要（model / scenario / thinking / reasoningEffort / speed / prompt 长度）、
+每一帧 `ChatResponse` 原文、末尾一条 `end`（状态、正文字数、思考字数、引用数）。
+令牌、Cookie、Authorization 头从不写入。
+
+两点提示：
+
+- `provider test` 只等到第一个 token 就取消，所以它的日志通常没有 `end` 行；要完整日志就发一次真实对话（客户端里问一句即可）。
+- magpie 在容器里时，环境变量会传给插件进程，把日志指到挂载目录再取出来就行：
+
+  ```bash
+  docker exec -e KIMI_TRACE=/config/magpie/kimi-trace.jsonl magpie /usr/local/bin/magpie provider test kimi-chat kimi-fast
+  ```
 
 协议事实表（端点 / proto / 认证头 / 参数刻度 / 错误码 / 待验证项）见 [PROTOCOL.md](PROTOCOL.md)。
 

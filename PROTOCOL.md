@@ -103,6 +103,41 @@ Block 关键类型（ByvlHBJO__21.txt）：`text{content,tips}`、`think{content
 `kimi.chat.v1.Reason` 19 值：CONTENT_FILTER/TOKEN_LENGTH_TOO_LONG/COMPLETION_OVERLOADED/REQUEST_ERROR/TEXT_USAGE_EXCEEDED/THINK_USAGE_EXCEEDED/K2_USAGE_EXCEEDED/REQUEST_RATE_EXCEEDED/RESEARCH_TASK_CONCURRENT_LIMIT/DEEP_RESEARCH_USAGE_EXCEEDED/ANONYMOUS_USAGE_EXCEEDED/ABNORMAL_USER_USAGE_EXCEEDED/ABNORMAL_USER_SURVEY_REQUIRED/EXCEED_TOOL_CALL_MAX_ROUNDS/RATE_LIMIT_EXCEEDED/CHAT_INTERRUPTED/CHAT_FATAL_ERROR/LLM_UNAVAILABLE。
 Usage 限流类 → magpie rate_limited；CONTENT_FILTER → content_filter；CHAT_INTERRUPTED → cancelled。
 
+### 4.5 逐帧样例：快速模型 + 进阶思考（2026-10-27 真机）
+
+请求（插件发往 `kimi.gateway.chat.v1.ChatService/Chat` 的 options，与网页同构）：
+
+```
+A 低档  {model:"k28-instant", scenario:1, thinking:true, reasoningEffort:3, speed:5}
+B 进阶  {model:"k28-instant", scenario:1, thinking:true, reasoningEffort:5, speed:5}
+```
+
+同一问句（「你好，今天是几号，北京天气如何」）的差异：
+
+| | 思考档 | 帧数 | 思考字数 | 工具帧 | 耗时 | 结果 |
+|---|---|---|---|---|---|---|
+| A | 低 (3) | 135 | 240 | 0 | 5.7 s | 凭记忆作答，不带检索 |
+| B | 进阶 (5) | 1284 | 2621 | 17 | 24–46 s | 真去调用 web_search，带检索结果与引用 |
+
+B 的关键帧（`op=1 set / 2 append`，`eventOffset` 单调递增）：
+
+```
+9   op=1 block={id:"1", messageId:"1a17d689-…"}                      # 建空块（段落/消息骨架）
+10  op=1 block={id:"2", …}
+11  op=2 block=3 THINK +2 …（每帧 +1~+10 字，累计 2621 字）           # 思考字流
+128 op=1 block=4 tool{name:"web_search", status:1, args:""}         # PENDING：发起工具调用
+129 op=2 block=4 tool{args:"{"}                                      # 参数按字符 append（JSON 文本）
+…
+142 op=2 block=4 tool{args:"}"}
+144 op=1 block=4 tool{status:2, args:"{"queries":["北京天气 2026年10月27日"]}"}   # RUNNING：参数完整
+147 op=1 block=4 tool{status:3, contents:[12 条 SearchResultBase]}   # DONE：结果回填
+…   op=2 block=6 TEXT +1 …                                            # 正文流，内含 <REF>cite✦tools://web_search:…#…</REF>
+```
+
+- `tool.status`：**1=PENDING / 2=RUNNING / 3=DONE**；`tool.args` 是流式追加的 JSON 字符串，`tool.contents` 才是结果。
+- 思考档位只有**同时** `thinking=true` 时上游才会挂 `web_search`；低档（3）即使 `tools:[{Search:{force:true}}]` 也不搜（见 §12.1）。
+- 引用不是独立 Ref 块，而是正文里内嵌的 `\uE3A0…` 私有区码点 `<REF>` 标记，前端替换成上标，插件用 `sanitizeInlineRefs()` 转 `[n]`。
+- 取证开关：`KIMI_TRACE=1` 或 `KIMI_TRACE=<path>` 会把 request 摘要 + 每一帧原文 + end 摘要写成 jsonl（`src/kimi-api.mjs` 的 `openTrace`），用于复现以上结论。
 ## 5. 模型档映射（2026-10-26 无鉴权 GetAvailableModels 实测定稿）
 
 **实测方法**：`GetAvailableModels` 无需鉴权（空 body=默认场景）。返回 `default_chat_model="k2d6-chat"`、`default_agent_model="k3-agent"`。
