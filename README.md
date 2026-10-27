@@ -194,7 +194,7 @@ Kimi 的网页/桌面容器里挂着 `/app/.agents/skills/<name>/SKILL.md`。模
 - `props`：`html`（必填，原样、未清洗）、`title`（从 `<h1~h3>`/`<title>` 抽的纯文本）、`text`（卡片外那句说明）、`height`（可选）；
 - 工具轮（`finish_reason: "tool_calls"`）不产卡片帧。
 
-宿主渲染要点（**安全**）：HTML 是模型输出，必须当不可信内容处理——
+宿主渲染要点（**安全**）：HTML 是模型输出，必须当不可信内容处理。仓库里有一份零依赖的宿主适配实现可以直接抄/直接用：[examples/html-card-renderer.js](examples/html-card-renderer.js)（`parseCardEnvelope` / `findCardEnvelopes` / `cardSrcDoc` / `renderHtmlCard`），下面是最小示意——
 
 ```js
 // 最小参考实现：沙箱 iframe + srcdoc，脚本与网络一律不许出
@@ -210,7 +210,7 @@ iframe.addEventListener("load", () => {              // 自适应高度
 })
 ```
 
-也可以把它降级成纯文本（直接显示 `props.html`）或丢弃；未知组件按协议应当退回文本摘要，不要整条消息失败。
+接线只要三步：① 流里出现名为 `kimi_ui__render` / `kimi_ui__patch` 的 function call 时**不要执行**（它是信封，不是真工具）；② `findCardEnvelopes(calls)` 取出卡片事件；③ `renderHtmlCard(container, props)` 挂上去。也可以把它降级成纯文本（直接显示 `props.html`）或丢弃；未知组件按协议应当退回文本摘要，不要整条消息失败。
 
 ## 用量与费用
 
@@ -239,7 +239,7 @@ iframe.addEventListener("load", () => {              // 自适应高度
 
 ```bash
 npm run check     # 16 个源文件语法检查
-npm test          # 单元测试（15 个文件 / 136 条，全部离线：假 transport，不需要登录、不打真实网络）
+npm test          # 单元测试（16 个文件 / 143 条，全部离线：假 transport，不需要登录、不打真实网络）
 ```
 
 测试覆盖：wire 级 protobuf 编解码、Chat 流解析、工具调用标记切分与手册压缩（含预算降级、300 工具语料）、网页端技能适配注入、登录输入解析（含中文提示文案）、模型目录映射、思考档夹取、token 估算、逐帧取证、空回答补偿重试、标题会话复用、用量换算、UI 事件信封、多轮会话映射。

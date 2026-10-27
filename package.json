@@ -14,7 +14,8 @@
     "PROTOCOL.md",
     "CHANGELOG.md",
     "THIRD_PARTY.md",
-    "LICENSE"
+    "LICENSE",
+    "examples"
   ],
   "keywords": [
     "opencode",

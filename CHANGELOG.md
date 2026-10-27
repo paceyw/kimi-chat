@@ -14,8 +14,14 @@
 - 流式：卡片帧在正文之后、`finish_reason` 之前发出；`finish_reason` 仍是 `stop`（卡片不是工具调用，
   不会让宿主进入工具循环）。非流式：`message.tool_calls` 里追加同一事件，`content` 保持 HTML。
 - 工具调用轮（`finish_reason: "tool_calls"`）不产卡片帧，避免和真正的工具结果混淆。
+- 新增宿主侧适配示例 `examples/html-card-renderer.js`（零依赖）：`isUiEnvelope` / `parseCardEnvelope` /
+  `findCardEnvelopes` / `cardCsp` / `cardSrcDoc` / `renderHtmlCard`——沙箱 iframe（`sandbox="allow-same-origin"`，
+  不含 `allow-scripts`）+ `default-src 'none'` 的 CSP + 自适应高度，渲染模型 HTML 时不放开脚本与网络。
 - 测试：`test/skills.test.mjs` 加 3 条（切分/围栏/忽略无关标记），`test/provider.test.mjs` 加 2 条
-  （流式补帧且 `finish_reason` 不变、非流式 content 不变并挂上事件）。全量 **136 条通过**。
+  （流式补帧且 `finish_reason` 不变、非流式 content 不变并挂上事件），`test/examples.test.mjs` 7 条
+  （信封解析、去重排序、CSP/沙箱属性、高度自适应）。全量 **143 条通过**。
+- 实测注意：网关侧（magpie）在流里看到 function call 时会把 `finish_reason` 改写成 `tool_calls`，
+  即使插件自己写的是 `stop`；因此宿主**必须**把 `kimi_ui__*` 当成不可执行的信封，否则会去找一个不存在的工具。
 
 ## 0.5.0 — 2026-10-27
 
