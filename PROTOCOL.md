@@ -361,6 +361,7 @@ tool_calls[] += { function: { name: "kimi_ui__render", arguments: JSON.stringify
 | 输出项 | `response.completed.output = ["message", "function_call"]`，`status="completed"` |
 | `finish_reason` | 网关（magpie）看到流里出现 function call 会改写成 `tool_calls`，即使插件自己写的是 `stop` |
 | 结论 | 宿主**必须**把 `kimi_ui__*` 当信封处理：不执行、不当作未知工具报错；取 `arguments` 解析后交给渲染器 |
+| 同轮其它帧 | 上游状态事件会同时出现（`component=agent-timeline`、`op=patch`），宿主要按 `component` 分流，别把 `patch` 当成卡片更新 |
 
 可直接复用的宿主实现：`examples/html-card-renderer.js`（零依赖，浏览器 ESM + Node 可测）。
 真机：`tools/probe-compact-live.mjs` 的 B 段（「…请用一个组件卡片展示」）在网关侧可看到 1 帧 `kimi_ui__render` + `component: "html-card"`（`html` 约 2.3k 字符、`text` 87 字符），正文照常流式输出；单测里 `finish_reason` 为 `stop`，经网关后会被改写成 `tool_calls`（见上表）。

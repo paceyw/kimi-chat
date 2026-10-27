@@ -6,7 +6,7 @@
 - 供应商 id：`kimi-chat`（客户端里写作 `kimi-chat/kimi-fast` 这样）
 - 上游：`https://www.kimi.com/apiv2`（connect-rpc over protobuf，私协议，见 [PROTOCOL.md](PROTOCOL.md)）
 - 能力：流式对话、思考档、联网搜索 + 引用、客户端工具调用（`tools`，工具手册压缩）、Kimi 网页端技能适配（如 `kimi-widget` 组件卡片，附 `html-card` 渲染事件）、生成式 UI 事件、月额度与费用估算、token 用量（估算，见下）
-- 当前版本：**0.6.0**（变更见 [CHANGELOG.md](CHANGELOG.md)）；Node ≥ 20.3，无运行时依赖，纯 ESM
+- 当前版本：**0.6.1**（变更见 [CHANGELOG.md](CHANGELOG.md)）；Node ≥ 20.3，无运行时依赖，纯 ESM
 
 ## 安装
 
@@ -182,7 +182,7 @@ Kimi 的网页/桌面容器里挂着 `/app/.agents/skills/<name>/SKILL.md`。模
 
 ### 卡片在客户端怎么渲染
 
-模型产出的卡片是**正文里的自包含 HTML**（0.5.0 起）。对不做 HTML 渲染的客户端，那就只是一段源码；所以 0.6.0 额外下发一帧 Agent UI Protocol 事件，让宿主把它渲染成真正的卡片：
+模型产出的卡片是**正文里的自包含 HTML**（0.5.0 起）。对不做 HTML 渲染的客户端，那就只是一段源码；所以 0.6.1 额外下发一帧 Agent UI Protocol 事件，让宿主把它渲染成真正的卡片：
 
 ```json
 {"v":1,"surfaceId":"card","itemId":"card","seq":2,"op":"create","component":"html-card",

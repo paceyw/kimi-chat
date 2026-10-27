@@ -33,6 +33,9 @@ const RULES = [
   "- `arguments` must be a single JSON object that satisfies the tool's JSON schema.",
   "- Never wrap the block in code fences, never explain the call, and never write anything after the closing tag.",
   "- After you output the block, the caller will run the tool and return its result as a `[tool result]` message.",
+  // 低思考档位上模型会误判“我这里是网页版、没有工具”，把已经交给它的工具当成不存在；
+  // 真机探针 A1（reasoning_effort=low）复现：calls []、正文“当前会话没有可调用的 get_weather 工具”。
+  "- The tools below are live and registered by the caller: call them by the exact name given. Never reply that a tool is unavailable while it is listed here.",
 ]
 
 const COMPACT_NOTE = [

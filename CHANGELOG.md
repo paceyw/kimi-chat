@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.1 — 2026-10-27
+
+### 工具手册补一条硬性说明：已列出的工具就是可用的
+
+- 真机复现：只声明 1 个工具（`get_weather`）+ `reasoning_effort: "low"` 时，模型会回
+  「当前会话没有可调用的 get_weather 工具」——思考档位低时它把自己当成 Kimi 网页版，无视提示词里的工具手册。
+- 工具手册的 `Rules:` 增加一条：`The tools below are live and registered by the caller: call them by the exact
+  name given. Never reply that a tool is unavailable while it is listed here.`（压缩/完整两种渲染共用）。
+- 真机复测（部署后连续 3 次）：`calls [get_weather]`、`finish_reason=tool_calls`，正文不再出现「没有工具」。
+- 同时确认卡片与既有 `agent-timeline` 事件可以共存：一次卡片轮次里 `html-card` 只有 1 帧 `create`，
+  其余帧是上游状态事件（`component=agent-timeline`），宿主按 `component` 分流即可。
+
 ## 0.6.0 — 2026-10-27
 
 **卡片以 `html-card` 组件交给客户端渲染（保留 HTML 产出）**
