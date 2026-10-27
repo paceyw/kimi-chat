@@ -1,0 +1,24 @@
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 本地临时产物 / 探针输出
+tmp/
+*.log
+*.sse
+.env
+.env.*
+
+# 编辑器与系统
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 本地独有的开发与运维资产（不随仓库发布）
+fixtures/
+tools/
+PLAN.md
+qr-login.png
+*.png
