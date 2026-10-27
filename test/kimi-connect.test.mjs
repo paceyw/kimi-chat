@@ -27,7 +27,7 @@ test("refreshToken 成功 → 解析 access/refresh token 对", async () => {
 
 test("refreshToken 长 token → 长度前缀是多字节 varint（回归：曾被截断成 1 字节）", async () => {
   const { refreshToken } = await import("../src/kimi-connect.mjs");
-  const { iterateFields, pickStr } = await import("../src/kimi-proto.mjs");
+  const { fields, pickStr } = await import("../src/kimi-proto.mjs");
   const origFetch = globalThis.fetch;
   const longToken = "r".repeat(300); // > 127，单字节长度会溢出
   let seen = null;
@@ -41,7 +41,7 @@ test("refreshToken 长 token → 长度前缀是多字节 varint（回归：曾�
   try {
     await refreshToken({ refreshToken: longToken });
     // 服务端视角：按 protobuf 解开必须还原出完整 token
-    assert.equal(pickStr(iterateFields(seen), 1), longToken);
+    assert.equal(pickStr(fields(seen), 1), longToken);
     // 字节级：tag 后第一个长度字节应有 continuation 位
     assert.equal(seen[0], 0x0a);
     assert.ok((seen[1] & 0x80) === 0x80, "length prefix must be multi-byte varint");
