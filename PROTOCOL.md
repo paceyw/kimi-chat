@@ -128,8 +128,9 @@ Usage 限流类 → magpie rate_limited；CONTENT_FILTER → content_filter；CH
 
 插件收到验证码后调 `LoginWithSMS`（**该校验不检查 captcha**，只要码正确就换得到 token）→ 拿到 `access_token` / `refresh_token` / `user_id`，直接落 oauth 形状。**全程不需要用户复制任何 token**，`accountId` 用返回的 `user_id`。
 
-**备选路径（粘贴 `refresh_token`，oauth `method:"code"` 无 prompts）**：标签 "高级：粘贴网页 refresh_token（备用）"。宿主打开 `https://www.kimi.com/login`，用户登录后在 DevTools Console 执行 `copy(localStorage.getItem('refresh_token'))`，回 magpie 粘贴；插件立刻调 `RefreshToken` 活体验证（401 当场拒绝、网络故障不假装成功），`userId` 取新 access token JWT 的 `sub`。粘贴形状容忍：裸 JWT、带引号、`refresh_token=<值>`、`{"refreshToken":...}` JSON；把 `access_token` 粘进来会被明确拒绝（它 15 分钟就过期，存下来等于假登录）。
-**界面文案**：两条方法的 `label` / `instructions` / 报错都是中文，`instructions` 一行一步（`第 1 步　…`），magpie 原样逐行显示。
+**备选路径（粘贴 `refresh_token`，oauth `method:"code"` 无 prompts）**：标签 "高级：粘贴网页 refresh_token（备用）"。宿主打开 `https://www.kimi.com/login`，用户登录后在 DevTools 的 **Application → Storage → Local Storage → `https://www.kimi.com`** 里对 `refresh_token` 右键 **Copy value**（Console 里 `copy(localStorage.refresh_token)` 同样可行），回 magpie 粘贴；插件立刻调 `RefreshToken` 活体验证（401 当场拒绝、网络故障不假装成功），`userId` 取新 access token JWT 的 `sub`。粘贴形状容忍：裸 JWT、带引号、`refresh_token=<值>`、`{"refreshToken":...}` JSON；把 `access_token` 粘进来会被明确拒绝（它 15 分钟就过期，存下来等于假登录）。
+**界面文案（2026-10-27 实测修正）**：两条方法的 `label` / `instructions` / 报错都是中文。宿主的登录弹窗把 `instructions` 放在 `.signing .s` 里，该规则只有 `color` / `font-size` / `overflow-wrap: anywhere`，**没有 `white-space: pre-wrap`**，所以 `\n` 会被折叠成一个空格（U+2028 / U+2029 在 Chromium 里同样折叠，U+0085 / U+000B 会显示成方块，都试过）——写不出一行一步。文案因此写成一个自然段 + `① ② ③ ④` 行内编号。
+**为什么需要复制的值不放在弹窗的复制按钮上**：插件 `authorize()` 能返回的字段只有 `{session, url, instructions, method, opened}`（`internal/plugin/providers.go` 的 `Authorization`），宿主弹窗里唯一带复制按钮的 `signlink` 固定绑定 `url`；`signing.code` 是宿主用正则 `(?i:\bcode):?\s+([A-Z0-9]+(?:-[A-Z0-9]+)+|[A-Z0-9]{6,})\b` 从 `instructions` 里抽出来的设备码（`codeIn()`），只认大写字母数字，塞不进命令。所以：复制动作改到 DevTools 里「右键 → Copy value」，用户不需要从弹窗文字里选中任何东西。
 
 **已下线：QR 扫码**（原 `CreateLoginQRCode` + `GetLoginQRCodeStatus` 轮询）。原因：`/wechat/mp/auth` 是微信专用确认页（chunk `CdQwmZoy2.js` 只有一张「open in WeChat」图 + 文案，无任何 RPC），桌面浏览器走不通；按产品要求改由验证码方式承接。`kimi-connect.mjs` 里的两个 QR 原语与其 wire 测试保留（未被登录流程引用）。
 

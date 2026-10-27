@@ -6,7 +6,7 @@
 - 供应商 id：`kimi-chat`（客户端里写作 `kimi-chat/kimi-fast` 这样）
 - 上游：`https://www.kimi.com/apiv2`（connect-rpc over protobuf，私协议，见 [PROTOCOL.md](PROTOCOL.md)）
 - 能力：流式对话、思考档、联网搜索 + 引用、客户端工具调用（`tools`）、生成式 UI 事件、月额度与费用估算
-- 当前版本：**0.3.1**（变更见 [CHANGELOG.md](CHANGELOG.md)）；Node ≥ 20.3，无运行时依赖，纯 ESM
+- 当前版本：**0.3.2**（变更见 [CHANGELOG.md](CHANGELOG.md)）；Node ≥ 20.3，无运行时依赖，纯 ESM
 
 ## 安装
 
@@ -52,7 +52,7 @@ magpie quota                              # 应出现「月额度」窗口与剩
 2. magpie 会打开 <https://www.kimi.com/login>。如果 Kimi 允许插件直接发码，短信会立刻到你手机；如果它要求人机验证（常见），就在刚打开的页面里走一遍「登录 → 手机号 → 发送验证码」，把码发出来。
 3. 回到 magpie，填你收到的 6 位验证码。
 
-插件拿这 6 位码当场换取会话令牌（`access_token` + `refresh_token`），**不需要你复制任何 token**；账号归属（`accountId`）取自令牌，不用填 ID。magpie 里显示的就是上面这份分步说明（第 1 步…第 4 步），一行一步。
+插件拿这 6 位码当场换取会话令牌（`access_token` + `refresh_token`），**不需要你复制任何 token**；账号归属（`accountId`）取自令牌，不用填 ID。magpie 弹窗里的说明与上面这几步一致，写成一个自然段、用 `① ② ③ ④` 编号（弹窗正文是普通段落，换行会被折叠，写不出一行一步）。
 
 ### 方式 B：粘贴 `refresh_token`（备用）
 
@@ -67,6 +67,8 @@ magpie quota                              # 应出现「月额度」窗口与剩
    ```
 
 3. 粘贴回 magpie。插件会立刻用它换新的 `access_token`：换成功才存，401（已登出/值不对）当场报错，不会留下几分钟后就失效的坏凭据。
+
+弹窗里的说明同理是一个自然段（`①`–`④`）：复制的动作在 DevTools 里「右键 → Copy value」完成，**不需要从弹窗文字里选中任何东西来复制**。
 
 只粘 `refresh_token` 一个值就够：`access_token` 由插件自己换，设备指纹（device/session id）由插件本地生成。
 

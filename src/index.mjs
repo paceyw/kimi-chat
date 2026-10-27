@@ -137,22 +137,17 @@ export const server = async () => {
             // 先试着直接发码；Kimi 会要求人机验证（不绕）——那就让用户在官网自己发码
             let sent = { ok: false, captcha: true, message: "" }
             try { sent = await sendVerifyCode(phone) } catch (error) { sent = { ok: false, captcha: true, message: error?.message ?? "" } }
+            // 弹窗里的说明文字是普通段落（magpie 不保留换行，实测 .signing .s 没有 pre-wrap），
+            // 所以用 ①②③④ 行内编号写成一个自然段，避免折行后读不出步骤。
             const instructions = sent.ok
-              ? [
-                  `验证码已发送到 ${shown}。`,
-                  "",
-                  "第 1 步　稍等几秒，查看手机短信。",
-                  `第 2 步　在下方输入框填入收到的 6 位数字，然后确认。`,
-                  "第 3 步　插件会用这个验证码自己换取登录凭据，全程不需要复制任何 token。",
-                ].join("\n")
-              : [
-                  "Kimi 发送短信前要求先过人机验证，所以验证码要在网页里发。",
-                  "",
-                  "第 1 步　在弹出的 Kimi 网页（https://www.kimi.com/login）里选择手机号验证码登录。",
-                  `第 2 步　填入手机号 ${shown}，完成滑块或人机验证，点「发送验证码」。`,
-                  "第 3 步　回到这里，在下方输入框填入短信里的 6 位数字，然后确认。",
-                  "第 4 步　插件会用这个验证码自己换取登录凭据，全程不需要复制任何 token。",
-                ].join("\n")
+              ? `验证码已发送到 ${shown}。① 稍等几秒查收短信；` +
+                "② 在下方输入框填入收到的 6 位数字并确认；" +
+                "③ 插件会自己用验证码换到登录凭据，全程不需要复制任何 token。"
+              : "Kimi 在发短信前要求过人机验证，所以验证码要在网页里发。" +
+                "① 在弹出的 Kimi 网页（https://www.kimi.com/login）里选手机号验证码登录；" +
+                `② 填入手机号 ${shown}，完成滑块或人机验证后点「发送验证码」；` +
+                "③ 回到这里，在下方输入框填入短信里的 6 位数字并确认；" +
+                "④ 插件会自己用验证码换到登录凭据，全程不需要复制任何 token。"
             return {
               // 跳转官方网页登录：这一页既能完成人机验证发码，也让用户看清登录的是哪个账号。
               url: `${ORIGIN}/login`,
@@ -192,20 +187,20 @@ export const server = async () => {
           type: "oauth",
           label: "高级：粘贴网页 refresh_token（备用）",
           async authorize() {
+            // 同样写成单段（见上面手机验证码方式里的说明）：换行会被 magpie 折叠。
+            // 关键改动：需要复制的值改在 DevTools 里「右键 → Copy value」拿到，
+            // 用户不需要从这段说明里选中任何文字来复制。
+            const instructions =
+              "备用方式，只在拿不到短信验证码时用（上面的「手机验证码登录」不需要复制任何东西，优先用它）。" +
+              "① 在弹出的 Kimi 网页里登录账号（手机号、微信、密码都可以）；" +
+              "② 按 F12 打开开发者工具，切到 Application（应用）→ Storage → Local Storage → https://www.kimi.com；" +
+              "③ 在右侧表格里找到 refresh_token 这一行，右键选 Copy value（复制值），值就进剪贴板了，" +
+              "复制的就是浏览器里的真实 token，不用复制这段说明文字；" +
+              "④ 回到这里，在下方输入框粘贴（Ctrl+V）后确认。" +
+              "习惯命令行的话，第 ③ 步也可以在 Console（控制台）里执行 copy(localStorage.refresh_token)。"
             return {
               url: `${ORIGIN}/login`,
-              instructions: [
-                "备用方式。上面的「手机验证码登录」不需要复制任何东西，建议优先用它。",
-                "",
-                "第 1 步　在弹出的 Kimi 网页里登录你的账号（手机号、微信、密码都可以）。",
-                "第 2 步　登录成功后按 F12 打开开发者工具，切到 Console（控制台）标签。",
-                "第 3 步　在控制台粘贴下面这一行并回车，refresh_token 会直接进剪贴板：",
-                "　　　copy(localStorage.getItem('refresh_token'))",
-                "第 4 步　回到这里，在下方输入框粘贴（Ctrl+V），然后确认。",
-                "",
-                "如果想一次粘贴两个 token，第 3 步改用这一行：",
-                "　　　copy(JSON.stringify({accessToken: localStorage.getItem('access_token'), refreshToken: localStorage.getItem('refresh_token')}))",
-              ].join("\n"),
+              instructions,
               method: "code",
               async callback(input) {
                 let parsed

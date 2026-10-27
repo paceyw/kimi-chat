@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.2 — 2026-10-27
+
+**登录说明排版修正**
+
+- 弹窗正文是普通段落（宿主 `.signing .s` 没有 `white-space: pre-wrap`），换行会被折叠成一个空格，
+  `第 1 步…` 整片挤成一段。两条方式的说明改为单段 + `① ② ③ ④` 行内编号，折行后仍能看出步骤边界。
+- 粘贴方式不再要求用户从说明文字里选中命令：改为 DevTools → Application → Local Storage →
+  `refresh_token` → 右键 **Copy value**，复制的就是浏览器里的真实令牌（Console 的
+  `copy(localStorage.refresh_token)` 保留为可选的快捷方式）。
+- 文档同步：README 与 `PROTOCOL.md` §6 记下「弹窗不能保留换行」与「插件 `authorize()` 没有可用的复制字段」
+  这两条宿主限制，避免以后再写成一行一步。
+
 ## 0.3.1 — 2026-10-27
 
 **登录界面**
